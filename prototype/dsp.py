@@ -34,7 +34,7 @@ class GainEstimator:
     def __init__(self, n_fft=1024, hop=256, window="hann", tail=128, amount=0.7,
                  fs=FS, dd_tau=0.1, rel_tau=0.02, omlsa=False, fast=0, fast_rel=0.03, fthr=4.0, fband_min=2, psmooth=0.0,
                  over_k=1.5, speech_floor_db=None, vad_rel=0.15, cep=False, cep_tau=0.3, floor_db=40.0,
-                 gexp=1.0, gexp_sp=None):
+                 gexp=1.0, gexp_sp=None, vad_fast=False, cq=0.0, cq_start=2000.0, hf_floor_db=None, hf_start=7000.0):
         self.n, self.hop, self.fs = n_fft, hop, fs
         self.win = hann(n_fft) if window == "hann" else asym_window(n_fft, tail)
         self.amount = amount
@@ -55,6 +55,11 @@ class GainEstimator:
         self.a_vad_rel = np.exp(-frame_t / vad_rel)
         self.vad = 0.0
         self.cep = cep
+        self.vad_fast = vad_fast
+        self.cq, self.cq_start = cq, cq_start
+        self.cq_idx = None
+        self.hf_floor_db, self.hf_start = hf_floor_db, hf_start
+        self.fast_vad_v = 0.0
         self.a_cep = np.exp(-frame_t / cep_tau)
         self.a_cep_env = np.exp(-frame_t / 0.002)
         self.cep_prev = None
@@ -97,14 +102,26 @@ class GainEstimator:
         over = 1.0 + self.over_k * amt
         gmin = 10 ** (-(amt * self.floor_db) / 20)
         nz = self.noise * over
-        gamma = P / nz
-        xi_dd = self.a_dd * self.prev_s / nz + (1 - self.a_dd) * np.maximum(gamma - 1, 0)
+        Pg = P
+        if self.cq > 0:
+            # constant-Q smoothing of power and noise above cq_start for the gain decision
+            if self.cq_idx is None:
+                nb = len(P); k = np.arange(nb)
+                half = np.where(k * self.fs / self.n >= self.cq_start, np.maximum(0, np.round(k * self.cq / 2)), 0).astype(int)
+                self.cq_idx = (np.clip(k - half, 0, nb - 1), np.clip(k + half, 0, nb - 1))
+            lo, hi = self.cq_idx
+            cs = lambda v: (lambda c: (c[hi + 1] - c[lo]) / (hi - lo + 1))(np.concatenate([[0.0], np.cumsum(v)]))
+            Pg = cs(P); nz = cs(nz)
+        gamma = Pg / nz
+        xi_dd = self.a_dd * (cs(self.prev_s) if self.cq > 0 else self.prev_s) / nz + (1 - self.a_dd) * np.maximum(gamma - 1, 0)
         xi_dd = np.maximum(xi_dd, 1e-4)
         g = xi_dd / (1 + xi_dd)
         if self.speech_floor_db is not None or self.gexp_sp is not None:
             # frame-level speech presence: share of 100 Hz-4 kHz bins with a-priori SNR > 0 dB
             k0, k1 = int(100 / self.fs * self.n), int(4000 / self.fs * self.n)
             v = np.clip((np.mean(xi_dd[k0:k1] > 1.0) - 0.05) / 0.15, 0, 1)
+            if self.vad_fast:
+                v = max(v, self.fast_vad_v)
             self.vad = v if v > self.vad else self.a_vad_rel * self.vad + (1 - self.a_vad_rel) * v
         ge = self.gexp if self.gexp_sp is None else self.gexp * (1 - self.vad) + self.gexp_sp * self.vad
         if ge != 1.0:
@@ -145,6 +162,10 @@ class GainEstimator:
             snr = Pb / Nb
             T = 1 + self.fthr / np.sqrt(K)       # variance-aware threshold
             gb = np.clip((snr - T) / (snr + 1e-12), 0, 1) ** 0.5
+            if self.vad_fast:
+                fb_lo = np.searchsorted(e, int(100 / self.fs * self.fast))
+                fb_hi = np.searchsorted(e, int(4000 / self.fs * self.fast))
+                self.fast_vad_v = float(np.clip((np.mean(gb[fb_lo:fb_hi] > 0.3) - 0.1) / 0.3, 0, 1))
             gs = np.zeros(len(Ps))
             for j in range(len(K)):
                 gs[e[j]:e[j + 1]] = gb[j]
@@ -167,6 +188,12 @@ class GainEstimator:
             p = p * pw
             g = np.exp(p * np.log(np.maximum(g, gmin)) + (1 - p) * np.log(gmin))
         else:
+            if self.hf_floor_db is not None:
+                # while speech is present keep some 'air': raise the floor above hf_start
+                k = int(self.hf_start / self.fs * self.n)
+                gmin = np.full(len(g), gmin)
+                hf = 10 ** (-self.hf_floor_db / 20)
+                gmin[k:] = np.exp((1 - self.vad) * np.log(gmin[k:]) + self.vad * np.log(np.maximum(gmin[k:], hf)))
             g = gmin + (1 - gmin) * g
         return g, X
 
