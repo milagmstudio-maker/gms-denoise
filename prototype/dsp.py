@@ -174,6 +174,7 @@ class GainEstimator:
             gl = np.append(gl, gs[-1])
             gf = np.maximum(gl, self.a_frel * self.gf_prev)
             self.gf_prev = gf
+            self.gf_last = gf
             g = np.maximum(g, gf)
         if self.speech_floor_db is not None:
             fs_lin = max(gmin, 10 ** (-self.speech_floor_db / 20))

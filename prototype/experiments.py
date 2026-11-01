@@ -49,3 +49,95 @@ cfg("hf18", **dict(BV, hf_floor_db=18))
 
 cfg("v3_final", **dict(BV, hf_floor_db=12))
 cfg("v3_final_hq", la=512, **dict(BV, hf_floor_db=12))
+
+
+def _rnnoise(sigs):
+    """xiph RNNoise v0.1.1 (BSD) via a tiny CLI; 480-sample (10 ms) algorithmic delay removed."""
+    import subprocess, tempfile
+    import numpy as np
+    clean, noise, mix = sigs
+    with tempfile.TemporaryDirectory() as d:
+        mix.astype("float32").tofile(f"{d}/in.raw")
+        subprocess.run(["/home/claude/ext/rnnoise/rn_cli", f"{d}/in.raw", f"{d}/out.raw"], check=True)
+        y = np.fromfile(f"{d}/out.raw", dtype="float32").astype(float)
+    y = y[480:480 + len(mix)]
+    y = np.pad(y, (0, len(mix) - len(y)))
+    # nonlinear: shadow filtering impossible -> speech/noise columns are not meaningful
+    return [clean, noise, y]
+
+
+register("rnnoise")(_rnnoise)
+
+
+# ---- hybrid: RNNoise gains applied causally through our zero-latency FIR path ----
+def _rnn_gains(mix):
+    import subprocess, tempfile
+    import numpy as np
+    with tempfile.TemporaryDirectory() as d:
+        mix.astype("float32").tofile(f"{d}/in.raw")
+        subprocess.run(["/home/claude/ext/rnnoise/rn_cli_g", f"{d}/in.raw", f"{d}/out.raw", f"{d}/g.raw"], check=True)
+        g = np.fromfile(f"{d}/g.raw", dtype="float32").astype(float).reshape(-1, 481)
+    nfr = len(mix) // 64
+    rows = np.full((nfr, 513), 1.0)
+    x481 = np.linspace(0, 1, 481); x513 = np.linspace(0, 1, 513)
+    gi = np.stack([np.interp(x513, x481, r) for r in g])
+    for i in range(nfr):
+        k = ((i + 1) * 64) // 480 - 1   # latest RNN frame finished by sample (i+1)*64
+        if 0 <= k < len(gi):
+            rows[i] = gi[k]
+    return rows
+
+
+def _hybrid(mode, la=0):
+    def f(sigs):
+        import numpy as np
+        from dsp import GainEstimator, compute_gains, minphase_fir, apply_tv_fir
+        clean, noise, mix = sigs
+        R = np.maximum(_rnn_gains(mix), 10 ** (-55 / 20))
+        if mode == "rnn":
+            G = R
+        else:
+            est = GainEstimator(1024, 64, "hann", **dict(V1, **BV, hf_floor_db=12))
+            Gv = compute_gains(mix, est)
+            n = min(len(Gv), len(R)); Gv, R = Gv[:n], R[:n]
+            if mode == "min":
+                G = np.minimum(Gv, R)
+            elif mode == "soft":
+                G = Gv * np.sqrt(R)
+            elif mode == "geo":
+                G = np.sqrt(Gv * R)
+        H = np.stack([minphase_fir(g, 512, 1024) for g in G])
+        return [apply_tv_fir(np.concatenate([np.zeros(la), s]), H, 64)[la:] for s in sigs]
+    return f
+
+
+register("zl_rnn")(_hybrid("rnn"))
+register("zl_rnn_la512")(_hybrid("rnn", 512))
+register("v3_min_rnn")(_hybrid("min"))
+register("v3_x_rnn_soft")(_hybrid("soft"))
+register("v3_geo_rnn")(_hybrid("geo"))
+
+
+def _rnn_onset(scale=1.0, la=0, fthr=4):
+    """RNNoise gains (zero latency) + our 256-pt onset path opening bands until the RNN catches up."""
+    def f(sigs):
+        import numpy as np
+        from dsp import GainEstimator, minphase_fir, apply_tv_fir
+        clean, noise, mix = sigs
+        R = np.maximum(_rnn_gains(mix), 10 ** (-55 / 20))
+        est = GainEstimator(1024, 64, "hann", **dict(V1, **dict(BV, hf_floor_db=12, fthr=fthr)))
+        n = est.n
+        xp = np.concatenate([np.zeros(n), mix])
+        G = R.copy()
+        for i in range(len(R)):
+            end = n + (i + 1) * 64
+            est.frame(xp[end - n:end])
+            G[i] = np.maximum(R[i], scale * est.gf_last)
+        H = np.stack([minphase_fir(g, 512, 1024) for g in G])
+        return [apply_tv_fir(np.concatenate([np.zeros(la), s]), H, 64)[la:] for s in sigs]
+    return f
+
+
+register("rnn_onset")(_rnn_onset())
+register("rnn_onset_ft6")(_rnn_onset(fthr=6))
+register("rnn_onset_half")(_rnn_onset(scale=0.5))
