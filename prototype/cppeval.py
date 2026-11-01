@@ -14,8 +14,29 @@ CLI = os.environ.get("ZD_CLI", "/home/claude/zerodenoise/build/zd_cli")
 MODES = {  # name: (env, lookahead)
     "zero": ({}, 0), "low": ({}, 128), "hq": ({}, 512), "ai": ({"ZD_AI": "1"}, 480)}
 MODES["ai"] = ({"ZD_AI": "1"}, 480)                          # with hiss assist (default)
+MODES["ai_v07"] = ({"ZD_AI": "1", "ZD_NOGUARD": "1"}, 480)   # hiss assist only (v0.7)
+MODES["ai_noon"] = ({"ZD_AI": "1", "ZD_NOONSET": "1"}, 480)
+MODES["ai_nohold"] = ({"ZD_AI": "1", "ZD_NOHOLD": "1"}, 480)
+MODES["ai_r15"] = ({"ZD_AI": "1", "ZD_VREL": "0.015"}, 480)
+MODES["ai_r8"] = ({"ZD_AI": "1", "ZD_VREL": "0.008"}, 480)
 MODES["ai_pure"] = ({"ZD_AI": "1", "ZD_AI_PURE": "1"}, 480)  # network gains only
 AMOUNT = os.environ.get("AMOUNT", "0.7")
+
+
+def run_mode(mode, clean, nz, mix):
+    if mode == "bypass":
+        return clean, nz, mix
+    env, la = MODES[mode]
+    with tempfile.TemporaryDirectory() as td:
+        i, o = f"{td}/in.wav", f"{td}/out.wav"
+        sf.write(i, np.stack([mix + clean, mix - clean], 1).astype(np.float32), FS, subtype="FLOAT")
+        e = dict(os.environ, ZD_LOOKAHEAD=str(la), **env)
+        subprocess.run([CLI, i, o, AMOUNT], env=e, check=True, capture_output=True)
+        y, _ = sf.read(o)
+    y = y[la:]
+    y = np.concatenate([y, np.zeros((la, 2))])  # undo reported latency (host PDC)
+    om, oc = (y[:, 0] + y[:, 1]) / 2, (y[:, 0] - y[:, 1]) / 2
+    return oc, om - oc, om
 
 
 def job(args):
@@ -25,20 +46,7 @@ def job(args):
     ps = np.mean(clean[np.abs(clean) > 0.01] ** 2)
     nz = nz * np.sqrt(ps / 10 ** (snr / 10))
     mix = clean + nz
-    if mode == "bypass":
-        oc, on, om = clean, nz, mix
-    else:
-        env, la = MODES[mode]
-        with tempfile.TemporaryDirectory() as td:
-            i, o = f"{td}/in.wav", f"{td}/out.wav"
-            sf.write(i, np.stack([mix + clean, mix - clean], 1).astype(np.float32), FS, subtype="FLOAT")
-            e = dict(os.environ, ZD_LOOKAHEAD=str(la), **env)
-            subprocess.run([CLI, i, o, AMOUNT], env=e, check=True, capture_output=True)
-            y, _ = sf.read(o)
-        y = y[la:]
-        y = np.concatenate([y, np.zeros((la, 2))])  # undo reported latency (host PDC)
-        om, oc = (y[:, 0] + y[:, 1]) / 2, (y[:, 0] - y[:, 1]) / 2
-        on = om - oc
+    oc, on, om = run_mode(mode, clean, nz, mix)
     m = ev.metrics(clean, nz, oc, on, om)
     sk = 2 * FS
     m["lsd"] = re_.lsd(clean[sk:], oc[sk:])
@@ -52,14 +60,15 @@ def job(args):
 
 if __name__ == "__main__":
     modes = sys.argv[1:] or ["bypass", "zero", "low", "hq", "ai"]
-    jobs = [(c, nn, s, i) for c in modes for i, nn in enumerate(re_.NOISES) for s in re_.SNRS]
+    sel = os.environ.get("NOISES")
+    jobs = [(c, nn, s, i) for c in modes for i, nn in enumerate(re_.NOISES) for s in re_.SNRS if not sel or nn in sel.split(",")]
     with Pool(4) as p:
         res = p.map(job, jobs)
     keys = ["SIG", "BAK", "OVRL", "speech_dB", "onset_dB", "pause_dB", "lsd", "stoi"]
     by = {}
     for c, nn, s, m in res:
         by.setdefault(c, []).append(m)
-    print(f"amount={AMOUNT}, {len(re_.NOISES)} noises x {re_.SNRS} dB")
+    print(f"amount={AMOUNT}, noises {sel or 'all'} x {re_.SNRS} dB")
     print(f"{'mode':8s} " + " ".join(f"{k:>9s}" for k in keys))
     for c in modes:
         print(f"{c:8s} " + " ".join(f"{np.mean([m[k] for m in by[c]]):9.2f}" for k in keys), flush=True)

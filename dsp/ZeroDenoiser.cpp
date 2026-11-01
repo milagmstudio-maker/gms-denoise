@@ -38,6 +38,13 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     fftLong.prepare(nFFT);
     fftFast.prepare(nFast);
     fftMp.prepare(nFFT);
+    fftAc.prepare(2 * nFFT);
+    acBuf.assign(2 * nFFT, 0.0f);
+    acSpec.assign(nFFT + 1, {});
+    lagMin = (int) std::floor(fs / 1600.0);
+    lagMax = (int) std::ceil(fs / 100.0);
+    acKLo = (int) (300.0 / fs * 2 * nFFT); // above car/engine rumble; voices have harmonics here
+    acKHi = (int) (5000.0 / fs * 2 * nFFT);
 
     winLong.resize(nFFT);
     for (int i = 0; i < nFFT; ++i) winLong[i] = hannAt(i, nFFT);
@@ -71,9 +78,23 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aFastRel = std::exp(-frameT / 0.03);
     aPs = std::exp(-frameT / 0.004);
     aRel = std::exp(-frameT / 0.02);
+    aVoiceRel = std::exp(-frameT / 0.015); // short release: noise must not leak after a word ends
+    maxVoiceHoldHops = (long) (2.0 / frameT);
+    // window autocorrelation, to undo the Hann taper's bias on long lags
+    winAc.assign(nFFT, 0.0f);
+    {
+        double w0 = 0.0;
+        for (int i = 0; i < nFFT; ++i) w0 += (double) winLong[i] * winLong[i];
+        for (int t = 0; t <= lagMax && t < nFFT; ++t) {
+            double a = 0.0;
+            for (int i = 0; i + t < nFFT; ++i) a += (double) winLong[i] * winLong[i + t];
+            winAc[t] = (float) std::max(a / w0, 0.25);
+        }
+    }
     aVadRel = std::exp(-frameT / 0.15);
     aLearn = std::exp(-frameT / 2.0); // learning = running mean, then ~2 s memory
     warmFrames = (int) (0.1 * fs / hop);
+    settleFrames = warmFrames + (long) (1.0 * fs / hop);
 
     frame.assign(nFFT, 0.0f);
     tmp.assign(nFFT, 0.0f);
@@ -121,6 +142,8 @@ void ZeroDenoiser::reset()
     std::fill(gAi.begin(), gAi.end(), 1.0f);
     std::fill(gDsp.begin(), gDsp.end(), 1.0f);
     aiVad = 0.0;
+    voiced = 0.0;
+    holdBudget = (double) maxVoiceHoldHops;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
@@ -210,7 +233,19 @@ void ZeroDenoiser::computeDspGain(float* out)
     const bool warming = frames <= warmFrames;
     // Learn: average the input as pure noise. Freeze: keep the profile fixed.
     const bool learning = params.learn;
-    const bool frozen = !params.adaptive && !learning && !warming;
+    // AI mode voice guard: a sustained pitched voice (scream, held note) must not
+    // be learned as noise. Hold the noise profile while it lasts, at most 3 s so a
+    // tonal noise that starts later is still learned eventually.
+    // Budgeted: holding spends 1 hop, not holding refills 1/3 hop (max 2 s of hold
+    // per ~6 s), and nothing is held in the first second while the tracker settles.
+    bool voiceHold = false;
+    if (aiActive && params.aiVoiceGuard && !dbgNoHold && voiced > 0.5 && !learning && frames > settleFrames && holdBudget >= 1.0) {
+        voiceHold = true;
+        holdBudget -= 1.0;
+    } else {
+        holdBudget = std::min(holdBudget + 1.0 / 3.0, (double) maxVoiceHoldHops);
+    }
+    const bool frozen = (!params.adaptive && !learning && !warming) || voiceHold;
     if (learning) ++learnFrames;
     const double aL = std::max(1.0 - 1.0 / (double) std::max<long>(1, learnFrames), aLearn);
 
@@ -320,12 +355,54 @@ void ZeroDenoiser::computeDspGain(float* out)
     }
 }
 
+double ZeroDenoiser::computeVoicing()
+{
+    // Normalised autocorrelation of the part of the signal that stands above the
+    // tracked (stationary) noise floor, 300 Hz-5 kHz. Pitched voice - including
+    // screams and very high voices the network was not trained on - gives a
+    // strong peak at the pitch period; hiss, hum, fans and clatter do not.
+    const float* x = anaBuf.data() + anaPos;
+    for (int i = 0; i < nFFT; ++i) acBuf[i] = x[i] * winLong[i];
+    std::fill(acBuf.begin() + nFFT, acBuf.end(), 0.0f);
+    fftAc.forwardReal(acBuf.data(), acSpec.data());
+    double tot = 0.0, ntot = 1e-20;
+    for (int k = 0; k <= nFFT; ++k) {
+        float v = 0.0f;
+        if (k >= acKLo && k < acKHi) {
+            const double P = (double) std::norm(acSpec[k]);
+            const double nz = 2.0 * noise[(size_t) std::min(k / 2, nBins - 1)];
+            v = (float) std::max(P - nz, 0.0);
+            tot += v;
+            ntot += nz;
+        }
+        acSpec[k] = { v, 0.0f };
+    }
+    lastResid = tot / ntot; // above-noise power relative to 2x noise floor, 80 Hz-5 kHz
+    if (tot <= 1e-12) return 0.0;
+    fftAc.inverseReal(acSpec.data(), acBuf.data());
+    const double r0 = acBuf[0];
+    if (r0 <= 0.0) return 0.0;
+    double best = 0.0;
+    for (int t = lagMin; t <= lagMax; ++t) best = std::max(best, (double) acBuf[t] / (r0 * winAc[t]));
+    return best;
+}
+
 void ZeroDenoiser::analyseAi()
 {
-    const bool assist = params.aiHissAssist;
+    const bool assist = params.aiHissAssist, guard = params.aiVoiceGuard;
     // The DSP estimator keeps running in AI mode: it tracks stationary noise
     // (hiss, hum, fans) that the network often leaves in.
-    if (assist) computeDspGain(gDsp.data());
+    if (assist || guard) computeDspGain(gDsp.data());
+    if (guard) {
+        const double r = computeVoicing();
+        lastVoicing = r;
+        // periodic AND clearly above the noise floor (pauses: resid < 0.5)
+        const double gate = std::clamp((lastResid - residLo) / (residHi - residLo), 0.0, 1.0);
+        double v = std::clamp((std::min(r, 1.0) - voiceLo) / (voiceHi - voiceLo), 0.0, 1.0) * gate;
+        // loud onsets (also unvoiced) well above the noise: protect from the first hop
+        if (dbgOnset) v = std::max(v, fastVad * gate);
+        voiced = v > voiced ? v : aVoiceRel * voiced + (1.0 - aVoiceRel) * v;
+    }
     if (aiNew) {
         aiNew = false;
         // Network bins: 481 over a 960-pt FFT at fs/scale. Ours: nFFT = 1024*scale
@@ -342,7 +419,7 @@ void ZeroDenoiser::analyseAi()
         }
         const double v = (double) ai.vadProbability();
         aiVad = v > aiVad ? v : 0.5 * aiVad + 0.5 * v; // per 10 ms frame: instant attack, ~15 ms release
-    } else if (!assist) {
+    } else if (!assist && !guard) {
         curRev = nextRev; // finish the previous crossfade, hold the filter
         return;
     }
@@ -360,6 +437,12 @@ void ZeroDenoiser::analyseAi()
             const float a = gAi[k], d = gDsp[k];
             gain[k] = d < a ? a * (float) std::exp(w * std::log(std::max((double) d / a, kCap))) : a;
         }
+    }
+    if (guard && voiced > 0.0) {
+        // Voice guard: while a pitched voice is present the network may not cut
+        // below the DSP (stationary-noise) gain.
+        const float vg = (float) std::min(1.0, voiced * dbgSat);
+        for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], vg * gDsp[k]);
     }
     for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());

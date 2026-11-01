@@ -113,3 +113,31 @@ modes; synthetic white noise anywhere between -1 and -30 dB). With the hiss assi
 hiss pauses reach -24 dB at 5 and 10 dB SNR, voice spectral distortion on hiss stays at
 1.6-2.3 dB (DSP mode 2.5-4.0). Remaining weakness: onsets lose more than the DSP modes
 (-14 dB vs -11 dB in the first 20 ms); typing is barely reduced by any mode.
+
+## Voice guard (v0.8, 2026-11-01)
+
+RNNoise cuts voices it was not trained on: on EARS screams/yells it removed 4 dB on
+average (5 dB above 2 kHz, 37 % of loud frames cut by more than 6 dB), and laughter
+lost 1.6 dB of highs. Lowering the input 12 dB changed nothing, so it is the voice
+character (pitch, roughness), not the level. A second effect: a sustained scream was
+learned as *noise* by the DSP tracker, so the hiss assist then cut it as well.
+
+Fix (AI mode only, on by default): a periodicity detector on the part of the signal that
+stands clearly above the noise floor (300 Hz-5 kHz, f0 100-1600 Hz, at least ~6 dB above
+2x the floor), plus loud onsets from the fast path. While it fires, the network may not cut
+below the DSP gain, and the noise profile is held (budget 2 s per ~6 s, none in the first
+second). Release 15 ms so noise does not leak after a word ends. Quiet background voices
+(cafe babble) are deliberately *not* protected.
+
+`prototype/expreval.py` (EARS loud / highpitch / scream+yell / anger / singing / laughter,
+4 speakers, 4 noises, 10 dB vs regular speech), speech-component change:
+
+| | scream | laugh | anger | onset (all styles) |
+|---|---|---|---|---|
+| Zero latency | -0.04 dB | -0.20 | -0.94 | -2.1 dB |
+| AI v0.7 | -4.07 dB | -0.62 | -0.79 | -3.8 dB |
+| AI v0.8 | -0.77 dB | -0.11 | -0.56 | -0.8 dB |
+
+Real-noise set (14 noises): OVRL 2.92 (v0.7 2.94), pause -23.9 dB (v0.7 -25.2), LSD 2.05
+(2.51). Car pauses are the main cost (-13 vs -27 dB in v0.7, still better than Zero latency).
+Quiet speech onsets buried in 5-10 dB SNR noise are unchanged (-13 dB first 20 ms; HQ mode -6).

@@ -256,6 +256,35 @@ static void testAiMode()
         const double redPure = rmsDb(ep, 48000 * 2, x.size()) - rmsDb(x, 48000 * 2, x.size());
         std::printf("     (network only, no hiss assist: %.1f dB)\n", redPure);
     }
+    // voice guard: a sustained, loud, high-pitched harmonic "scream" (f0 ~900 Hz with
+    // vibrato) over white noise must not be removed, nor learned as noise.
+    {
+        std::vector<float> sig(48000 * 6), nz(sig.size());
+        std::mt19937 r2(3); std::normal_distribution<float> n2(0.f, 0.01f);
+        double ph = 0.0;
+        for (size_t i = 0; i < sig.size(); ++i) {
+            nz[i] = n2(r2);
+            if (i >= 48000 * 2 && i < 48000 * 5) {
+                ph += 2.0 * M_PI * (900.0 + 30.0 * std::sin(2.0 * M_PI * 5.0 * i / 48000.0)) / 48000.0;
+                double v = 0.0;
+                for (int h = 1; h <= 6; ++h) v += std::sin(h * ph) / h;
+                sig[i] = (float) (0.15 * v);
+            }
+        }
+        auto runShadow = [&](bool guard) {
+            zd::ZeroDenoiser d; d.prepare(48000, 2);
+            zd::DenoiserParams p; p.ai = true; p.amount = 0.7f; p.aiVoiceGuard = guard; d.setParams(p); d.setLookahead(480);
+            std::vector<float> a(sig.size()), b(sig.size());
+            for (size_t i = 0; i < sig.size(); ++i) { a[i] = nz[i] + 2 * sig[i]; b[i] = nz[i]; } // mean = mix, (a-b)/2 = sig
+            float* ch[2] = { a.data(), b.data() };
+            d.process(ch, 2, (int) a.size());
+            std::vector<float> out(sig.size());
+            for (size_t i = 0; i + 480 < sig.size(); ++i) out[i] = 0.5f * (a[i + 480] - b[i + 480]);
+            return rmsDb(out, 48000 * 3, 48000 * 5) - rmsDb(sig, 48000 * 3, 48000 * 5); // seconds 1..3 of the scream
+        };
+        const double withGuard = runShadow(true), without = runShadow(false);
+        CHECK(withGuard > -1.0, "AI voice guard keeps a sustained 900 Hz scream (%.1f dB; without guard %.1f dB)", withGuard, without);
+    }
     // switching AI on/off at runtime stays finite
     {
         zd::ZeroDenoiser d; make(d, 1.0f);

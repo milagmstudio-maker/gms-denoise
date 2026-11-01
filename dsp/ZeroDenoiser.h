@@ -27,6 +27,7 @@ struct DenoiserParams {
     bool adaptive = true;  // false: freeze the noise profile (after learning)
     bool ai = false;       // gains from the RNNoise network instead of the DSP estimator
     bool aiHissAssist = true; // AI mode: DSP estimator adds attenuation for stationary noise (hiss)
+    bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
 };
 
 class ZeroDenoiser {
@@ -64,6 +65,7 @@ private:
     void designMinPhase(const float* gain, float* hOut);
     void analyseAi();        // AI mode: filter from the latest network gains
     void computeDspGain(float* out); // DSP estimator, one hop
+    double computeVoicing();         // 0..1 periodicity of the above-noise signal (300 Hz-5 kHz, f0 100-1600 Hz)
 
     DenoiserParams params;
     double fs = 48000.0;
@@ -103,6 +105,28 @@ private:
     bool aiNew = false, aiActive = false;
     std::vector<float> gAi, gDsp;
     double aiVad = 0.0; // network's speech probability (diagnostics)
+    FFT fftAc;
+    std::vector<float> acBuf, winAc;
+    std::vector<FFT::cpx> acSpec;
+    double voiced = 0.0, aVoiceRel = 0.0, lastVoicing = 0.0, lastResid = 0.0;
+    long maxVoiceHoldHops = 0, settleFrames = 0;
+    double holdBudget = 0.0;
+    // Voice guard tuning (prototype/expreval.py + cppeval.py, 2026-11-01):
+    // periodicity 0.6..0.95, above-noise power 4..12 x (2x noise floor) so quiet
+    // background voices (babble) are not protected, full protection from half confidence.
+    double voiceLo = 0.6, voiceHi = 0.95, residLo = 4.0, residHi = 12.0;
+public:
+    double dbgSat = 2.0; bool dbgOnset = true, dbgNoHold = false; // tuning hooks (zd_cli env)
+private:
+    int lagMin = 0, lagMax = 0, acKLo = 0, acKHi = 0;
+public:
+    double getVoicing() const { return voiced; }
+    double getRawVoicing() const { return lastVoicing; }
+    double getResid() const { return lastResid; }
+    void setVoicingThresholds(double lo, double hi) { voiceLo = lo; voiceHi = hi; }
+    void setResidThresholds(double lo, double hi) { residLo = lo; residHi = hi; }
+    void setVoicingRelease(double sec) { aVoiceRel = std::exp(-(hop / fs) / sec); }
+    void setVoicingBand(double loHz) { acKLo = (int) (loHz / fs * 2 * nFFT); }
 };
 
 } // namespace zd

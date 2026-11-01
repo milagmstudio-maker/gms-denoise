@@ -18,7 +18,16 @@ int main(int argc, char** argv)
     if (argc > 3) p.amount = std::atof(argv[3]);
     if (std::getenv("ZD_NOFAST")) p.onsetPath = false;
     if (std::getenv("ZD_AI")) p.ai = true;
-    if (std::getenv("ZD_AI_PURE")) p.aiHissAssist = false;
+    if (std::getenv("ZD_AI_PURE")) { p.aiHissAssist = false; p.aiVoiceGuard = false; }
+    if (std::getenv("ZD_NOGUARD")) p.aiVoiceGuard = false;
+    if (std::getenv("ZD_ACLO")) d.setVoicingBand(std::atof(std::getenv("ZD_ACLO")));
+    if (std::getenv("ZD_NOHOLD")) d.dbgNoHold = true;
+    if (std::getenv("ZD_GSAT")) d.dbgSat = std::atof(std::getenv("ZD_GSAT"));
+    if (std::getenv("ZD_GONSET")) d.dbgOnset = true;
+    if (std::getenv("ZD_VREL")) d.setVoicingRelease(std::atof(std::getenv("ZD_VREL")));
+    if (std::getenv("ZD_NOONSET")) d.dbgOnset = false;
+    if (std::getenv("ZD_RLO")) d.setResidThresholds(std::atof(std::getenv("ZD_RLO")), std::atof(std::getenv("ZD_RHI")));
+    if (std::getenv("ZD_VLO")) d.setVoicingThresholds(std::atof(std::getenv("ZD_VLO")), std::atof(std::getenv("ZD_VHI")));
     d.setParams(p);
     if (std::getenv("ZD_LOOKAHEAD")) d.setLookahead(std::atoi(std::getenv("ZD_LOOKAHEAD")));
     const int block = argc > 4 ? std::atoi(argv[4]) : 0; // 0 = varying
@@ -36,7 +45,10 @@ int main(int argc, char** argv)
             for (int i = 0; i < bs; ++i) {
                 for (int c = 0; c < nch; ++c) ptr[c] = a.ch[c].data() + pos + i;
                 d.process(ptr.data(), nch, 1);
-                if ((pos + i + 1) % 64 == 0) std::fwrite(d.currentGain().data(), 4, d.currentGain().size(), dump);
+                if ((pos + i + 1) % 64 == 0) {
+                    if (std::getenv("ZD_VDUMP")) { float v[3] = { (float) d.getRawVoicing(), (float) d.getResid(), (float) d.getVoicing() }; std::fwrite(v, 4, 3, dump); }
+                    else std::fwrite(d.currentGain().data(), 4, d.currentGain().size(), dump);
+                }
             }
         } else
         d.process(ptr.data(), nch, bs);
