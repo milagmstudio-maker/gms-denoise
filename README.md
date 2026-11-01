@@ -210,3 +210,4 @@ Result (cppeval, 6 noises x 5/10 dB): pause -19.6 -> -23.7 dB, OVRL 2.80 -> 2.84
 -11.8 -> -14.1 dB (quiet onsets after silence lose ~2 dB: reason for default off). Expressive set:
 scream unchanged, anger onset -1.8 -> -3.5 dB. Office gap -18.6 -> -19.1 (clicks keep it open),
 cafe -20 -> -25, hiss -34 -> -40, aircon/traffic -35 -> -40, typing unchanged (0 dB).
+Reduction 60 with pause cleanup: pause -24.6, OVRL 2.88, but onsets -20.6 dB - keep 40.
