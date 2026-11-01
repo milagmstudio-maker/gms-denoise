@@ -17,6 +17,7 @@ int main(int argc, char** argv)
     zd::DenoiserParams p;
     if (argc > 3) p.amount = std::atof(argv[3]);
     if (std::getenv("ZD_NOFAST")) p.onsetPath = false;
+    if (std::getenv("ZD_AI")) p.ai = true;
     d.setParams(p);
     if (std::getenv("ZD_LOOKAHEAD")) d.setLookahead(std::atoi(std::getenv("ZD_LOOKAHEAD")));
     const int block = argc > 4 ? std::atoi(argv[4]) : 0; // 0 = varying

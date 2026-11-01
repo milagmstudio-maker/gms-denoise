@@ -85,6 +85,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     hTmp.assign(nTaps, 0.0f);
     graw.assign(nBins, 0.0);
     ps.assign(nFast / 2 + 1, 0.0);
+    ai.prepare(scale); // network runs at fs/scale (44.1/48 kHz)
     reset();
 }
 
@@ -112,6 +113,9 @@ void ZeroDenoiser::reset()
     learnFrames = 0;
     fnoise.assign(bandEdges.size() - 1, 0.0);
     frames = 0;
+    ai.reset();
+    aiNew = false;
+    aiActive = params.ai;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
@@ -126,6 +130,11 @@ void ZeroDenoiser::setParams(const DenoiserParams& p)
 {
     if (p.learn && !params.learn) learnFrames = 0; // new learn pass starts fresh
     params = p;
+    if (params.ai != aiActive) { // mode switch: restart the network cleanly
+        aiActive = params.ai;
+        ai.reset();
+        aiNew = false;
+    }
 }
 
 void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
@@ -154,6 +163,7 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
         anaBuf[anaPos] = mono * invC;
         anaBuf[anaPos + nFFT] = mono * invC;
         anaPos = (anaPos + 1) % nFFT;
+        if (aiActive && ai.push(mono * invC)) aiNew = true;
 
         const float f = fade[hopCount];
         for (int c = 0; c < nc; ++c) {
@@ -165,7 +175,7 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 
         if (++hopCount == hop) {
             hopCount = 0;
-            analyse();
+            if (aiActive) analyseAi(); else analyse();
         }
     }
 }
@@ -300,6 +310,31 @@ void ZeroDenoiser::analyse()
     for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
     // crossfade starts from the filter that just finished fading in
     // (curRev now holds the previous 'next' filter)
+}
+
+void ZeroDenoiser::analyseAi()
+{
+    if (!aiNew) {
+        curRev = nextRev; // finish the previous crossfade, hold the filter
+        return;
+    }
+    aiNew = false;
+    // Network bins: 481 over a 960-pt FFT at fs/scale. Ours: nFFT = 1024*scale
+    // at fs, i.e. the same Hz spacing family, so bin k maps to k * 960/1024.
+    const double amt = std::clamp((double) params.amount, 0.0, 1.0);
+    const float gmin = (float) std::pow(10.0, -(amt * 55.0) / 20.0);
+    const float* r = ai.gains();
+    for (int k = 0; k < nBins; ++k) {
+        const double pos = std::min((double) k * 960.0 / 1024.0, (double) (AiGains::kBins - 1));
+        const int j = std::min((int) pos, AiGains::kBins - 2);
+        const float t = (float) (pos - j);
+        const float gr = std::clamp(r[j] + t * (r[j + 1] - r[j]), 0.0f, 1.0f);
+        gain[k] = gmin + (1.0f - gmin) * gr;
+        gainOut[k] = gain[k];
+    }
+    designMinPhase(gain.data(), hTmp.data());
+    curRev.swap(nextRev);
+    for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
 }
 
 void ZeroDenoiser::designMinPhase(const float* g, float* hOut)

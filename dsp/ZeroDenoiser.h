@@ -13,6 +13,7 @@
 //
 // All channels share one analysis (linked) so the stereo image is preserved.
 
+#include "AiGains.h"
 #include "FFT.h"
 #include <vector>
 
@@ -24,6 +25,7 @@ struct DenoiserParams {
     bool onsetPath = true;
     bool learn = false;    // while true: treat input as noise and learn its spectrum
     bool adaptive = true;  // false: freeze the noise profile (after learning)
+    bool ai = false;       // gains from the RNNoise network instead of the DSP estimator
 };
 
 class ZeroDenoiser {
@@ -59,6 +61,7 @@ public:
 private:
     void analyse();          // runs once per hop, designs nextFilter
     void designMinPhase(const float* gain, float* hOut);
+    void analyseAi();        // AI mode: filter from the latest network gains
 
     DenoiserParams params;
     double fs = 48000.0;
@@ -93,6 +96,9 @@ private:
     int warmFrames = 0;
     double aNoise = 0, aP = 0, aDD = 0, aFastRel = 0, aPs = 0, aLearn = 0;
     long learnFrames = 0;
+
+    AiGains ai;
+    bool aiNew = false, aiActive = false;
 };
 
 } // namespace zd

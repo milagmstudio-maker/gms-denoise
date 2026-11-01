@@ -9,8 +9,19 @@ endif()
 option(ZD_BUILD_PLUGIN "Build the JUCE plugin (VST3/AU/Standalone)" ON)
 
 # ---- DSP core (framework independent) ---------------------------------
-add_library(zd_dsp STATIC dsp/ZeroDenoiser.cpp)
+# RNNoise (BSD-3, vendored; see third_party/rnnoise/README.md)
+file(GLOB ZD_RNNOISE_SRC third_party/rnnoise/src/*.c)
+add_library(zd_rnnoise STATIC ${ZD_RNNOISE_SRC})
+target_include_directories(zd_rnnoise PUBLIC third_party/rnnoise/include)
+set_target_properties(zd_rnnoise PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+if(NOT MSVC)
+  target_compile_options(zd_rnnoise PRIVATE -w)
+  target_link_libraries(zd_rnnoise PUBLIC m)
+endif()
+
+add_library(zd_dsp STATIC dsp/ZeroDenoiser.cpp dsp/AiGains.cpp)
 target_include_directories(zd_dsp PUBLIC dsp)
+target_link_libraries(zd_dsp PUBLIC zd_rnnoise)
 set_target_properties(zd_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(zd_cli tools/zd_cli.cpp)
