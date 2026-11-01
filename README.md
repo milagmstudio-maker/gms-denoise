@@ -88,7 +88,11 @@ Mode "AI (10 ms)": the RNNoise network (xiph, BSD-3, vendored in `third_party/rn
 estimates per-bin gains every 480 samples; the gains are applied through the same
 minimum-phase FIR as the other modes, with 480 samples of lookahead. No audio is
 synthesised by the network, so Amount (floor up to 55 dB) and linked stereo still work.
-Learn / Adaptive have no effect in this mode and are greyed out.
+Hiss assist (v0.7, on by default): the DSP estimator keeps running in AI mode. Between
+words (DSP speech detector) it may add up to 20 dB of extra attenuation wherever its gain is
+lower than the network's; while speech is present the network's gains are used unchanged.
+This removes the stationary broadband noise (hiss) the network leaves in. Learn / Adaptive
+act on this DSP part. CPU at 48 kHz stereo: about 14 % of one core (Zero latency: 9 %).
 
 Final C++ path (`prototype/cppeval.py`, runs `zd_cli` with shadow filtering), Amount 70 %,
 14 noises x 5/10 dB SNR x 4 EARS speakers, DNSMOS P.835:
@@ -100,10 +104,12 @@ Final C++ path (`prototype/cppeval.py`, runs `zd_cli` with shadow filtering), Am
 | Low latency | 3.34 | 3.70 | 2.91 | -1.01 | -8.69 | -18.48 | 4.09 | 0.81 |
 | High quality | 3.30 | 3.69 | 2.89 | -0.92 | -6.81 | -18.20 | 3.77 | 0.82 |
 | AI (10 ms) | 3.27 | 3.82 | 2.92 | -0.75 | -13.42 | -22.70 | 2.12 | 0.83 |
+| AI (10 ms) + hiss assist, v0.7 | 3.27 | 3.88 | 2.95 | -0.81 | -13.80 | -25.13 | 2.50 | 0.83 |
 
 AI is clearly better on non-stationary noise (cafe pause -32 vs -10 dB, car -27 vs -8,
 copy machine -18 vs -8) and keeps the voice's spectrum closest (LSD 2.1 vs 4.3 dB).
-Known weaknesses: onsets lose more (-13 dB in the first 20 ms), and broadband hiss is
-removed poorly and inconsistently (pause -6 dB vs -25 dB for the DSP modes; on synthetic
-white noise the result swings between about -1 and -30 dB depending on the realisation).
-Use a DSP mode for hiss.
+Network alone (v0.6) removed broadband hiss poorly (pause -6 dB vs -25 dB for the DSP
+modes; synthetic white noise anywhere between -1 and -30 dB). With the hiss assist (v0.7)
+hiss pauses reach -24 dB at 5 and 10 dB SNR, voice spectral distortion on hiss stays at
+1.6-2.3 dB (DSP mode 2.5-4.0). Remaining weakness: onsets lose more than the DSP modes
+(-14 dB vs -11 dB in the first 20 ms); typing is barely reduced by any mode.

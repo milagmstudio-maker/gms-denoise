@@ -26,6 +26,7 @@ struct DenoiserParams {
     bool learn = false;    // while true: treat input as noise and learn its spectrum
     bool adaptive = true;  // false: freeze the noise profile (after learning)
     bool ai = false;       // gains from the RNNoise network instead of the DSP estimator
+    bool aiHissAssist = true; // AI mode: DSP estimator adds attenuation for stationary noise (hiss)
 };
 
 class ZeroDenoiser {
@@ -62,6 +63,7 @@ private:
     void analyse();          // runs once per hop, designs nextFilter
     void designMinPhase(const float* gain, float* hOut);
     void analyseAi();        // AI mode: filter from the latest network gains
+    void computeDspGain(float* out); // DSP estimator, one hop
 
     DenoiserParams params;
     double fs = 48000.0;
@@ -99,6 +101,8 @@ private:
 
     AiGains ai;
     bool aiNew = false, aiActive = false;
+    std::vector<float> gAi, gDsp;
+    double aiVad = 0.0; // network's speech probability (diagnostics)
 };
 
 } // namespace zd

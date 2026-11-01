@@ -247,9 +247,14 @@ static void testAiMode()
         for (size_t i = 0; i < x.size(); ++i) e = std::max({ e, (double) std::abs(a[i] - b[i]), (double) std::abs(a[i] - c[i]) });
         CHECK(e == 0.0, "AI output independent of host block size (max diff %.2e)", e);
         const double red = rmsDb(a, 48000 * 2, x.size()) - rmsDb(x, 48000 * 2, x.size());
-        // RNNoise was trained on real noise + speech; on synthetic full-band white
-        // noise it only reduces ~10-15 dB (known limitation, see README). Sanity check only.
-        CHECK(red < -8.0, "AI engages on white noise (%.1f dB; DSP modes reach < -25 dB)", red);
+        // The network alone handles synthetic white noise poorly; the hiss assist
+        // (DSP estimator, on by default) must bring it to DSP-mode depth.
+        CHECK(red < -25.0, "AI + hiss assist: white noise reduction %.1f dB", red);
+        zd::ZeroDenoiser dp; make(dp, 1.0f);
+        zd::DenoiserParams pp = dp.getParams(); pp.aiHissAssist = false; dp.setParams(pp);
+        std::vector<float> ep = x; run(dp, ep, 0);
+        const double redPure = rmsDb(ep, 48000 * 2, x.size()) - rmsDb(x, 48000 * 2, x.size());
+        std::printf("     (network only, no hiss assist: %.1f dB)\n", redPure);
     }
     // switching AI on/off at runtime stays finite
     {

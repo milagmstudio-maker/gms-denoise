@@ -82,6 +82,8 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     specMp.assign(nBins, {});
     gain.assign(nBins, 1.0f);
     gainOut.assign(nBins, 1.0f);
+    gAi.assign(nBins, 1.0f);
+    gDsp.assign(nBins, 1.0f);
     hTmp.assign(nTaps, 0.0f);
     graw.assign(nBins, 0.0);
     ps.assign(nFast / 2 + 1, 0.0);
@@ -116,6 +118,9 @@ void ZeroDenoiser::reset()
     ai.reset();
     aiNew = false;
     aiActive = params.ai;
+    std::fill(gAi.begin(), gAi.end(), 1.0f);
+    std::fill(gDsp.begin(), gDsp.end(), 1.0f);
+    aiVad = 0.0;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
@@ -181,6 +186,17 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 }
 
 void ZeroDenoiser::analyse()
+{
+    computeDspGain(gain.data());
+    for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
+    designMinPhase(gain.data(), hTmp.data());
+    curRev.swap(nextRev);
+    for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
+    // crossfade starts from the filter that just finished fading in
+    // (curRev now holds the previous 'next' filter)
+}
+
+void ZeroDenoiser::computeDspGain(float* out)
 {
     // ---- long analysis -------------------------------------------------
     const float* x = anaBuf.data() + anaPos; // latest nFFT samples, oldest first
@@ -300,38 +316,52 @@ void ZeroDenoiser::analyse()
         double gm = gmin;
         if (k >= hfStartBin) // keep some 'air' (sibilance, breath) while speech is present
             gm = std::exp((1.0 - vad) * std::log(gmin) + vad * std::log(std::max(gmin, kHfFloor)));
-        gain[k] = (float) (gm + (1.0 - gm) * gPrev[k]);
-        gainOut[k] = gain[k];
+        out[k] = (float) (gm + (1.0 - gm) * gPrev[k]);
     }
-
-    // ---- new filter ----------------------------------------------------
-    designMinPhase(gain.data(), hTmp.data());
-    curRev.swap(nextRev);
-    for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
-    // crossfade starts from the filter that just finished fading in
-    // (curRev now holds the previous 'next' filter)
 }
 
 void ZeroDenoiser::analyseAi()
 {
-    if (!aiNew) {
+    const bool assist = params.aiHissAssist;
+    // The DSP estimator keeps running in AI mode: it tracks stationary noise
+    // (hiss, hum, fans) that the network often leaves in.
+    if (assist) computeDspGain(gDsp.data());
+    if (aiNew) {
+        aiNew = false;
+        // Network bins: 481 over a 960-pt FFT at fs/scale. Ours: nFFT = 1024*scale
+        // at fs, i.e. the same Hz spacing family, so bin k maps to k * 960/1024.
+        const double amt = std::clamp((double) params.amount, 0.0, 1.0);
+        const float gmin = (float) std::pow(10.0, -(amt * 55.0) / 20.0);
+        const float* r = ai.gains();
+        for (int k = 0; k < nBins; ++k) {
+            const double pos = std::min((double) k * 960.0 / 1024.0, (double) (AiGains::kBins - 1));
+            const int j = std::min((int) pos, AiGains::kBins - 2);
+            const float t = (float) (pos - j);
+            const float gr = std::clamp(r[j] + t * (r[j + 1] - r[j]), 0.0f, 1.0f);
+            gAi[k] = gmin + (1.0f - gmin) * gr;
+        }
+        const double v = (double) ai.vadProbability();
+        aiVad = v > aiVad ? v : 0.5 * aiVad + 0.5 * v; // per 10 ms frame: instant attack, ~15 ms release
+    } else if (!assist) {
         curRev = nextRev; // finish the previous crossfade, hold the filter
         return;
     }
-    aiNew = false;
-    // Network bins: 481 over a 960-pt FFT at fs/scale. Ours: nFFT = 1024*scale
-    // at fs, i.e. the same Hz spacing family, so bin k maps to k * 960/1024.
-    const double amt = std::clamp((double) params.amount, 0.0, 1.0);
-    const float gmin = (float) std::pow(10.0, -(amt * 55.0) / 20.0);
-    const float* r = ai.gains();
-    for (int k = 0; k < nBins; ++k) {
-        const double pos = std::min((double) k * 960.0 / 1024.0, (double) (AiGains::kBins - 1));
-        const int j = std::min((int) pos, AiGains::kBins - 2);
-        const float t = (float) (pos - j);
-        const float gr = std::clamp(r[j] + t * (r[j + 1] - r[j]), 0.0f, 1.0f);
-        gain[k] = gmin + (1.0f - gmin) * gr;
-        gainOut[k] = gain[k];
+    if (!assist) {
+        for (int k = 0; k < nBins; ++k) gain[k] = gAi[k];
+    } else {
+        // Hiss assist: extra attenuation only where the DSP estimate is lower than
+        // the network's (stationary broadband noise the network leaves in). Full
+        // weight between words, none while the DSP detector hears speech (the voice
+        // keeps the network's more natural gains), capped at 20 dB so pauses do not
+        // drop far below the noise left under the voice (no pumping).
+        const double w = 1.0 - vad;
+        constexpr double kCap = 0.1; // -20 dB
+        for (int k = 0; k < nBins; ++k) {
+            const float a = gAi[k], d = gDsp[k];
+            gain[k] = d < a ? a * (float) std::exp(w * std::log(std::max((double) d / a, kCap))) : a;
+        }
     }
+    for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
     for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];

@@ -83,8 +83,7 @@ int main(int argc, char** argv)
             setMode(3);
             noiseRun(block, red);
             reds.push_back(red);
-            // the network reduces synthetic white noise much less than the DSP modes (known limitation)
-            check(red < -5.0, "AI mode, block " + juce::String(block) + ": network engaged, white noise " + juce::String(red, 1) + " dB");
+            check(red < -25.0, "AI mode (hiss assist), block " + juce::String(block) + ": white noise " + juce::String(red, 1) + " dB");
         }
         const auto mm = std::minmax_element(reds.begin(), reds.end());
         check(*mm.second - *mm.first < 0.5, "AI mode result independent of host block size (spread " +

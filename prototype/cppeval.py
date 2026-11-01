@@ -10,9 +10,11 @@ import realeval as re_
 import evaluate as ev
 import dnsmos
 FS = 48000
-CLI = "/home/claude/zerodenoise/build/zd_cli"
+CLI = os.environ.get("ZD_CLI", "/home/claude/zerodenoise/build/zd_cli")
 MODES = {  # name: (env, lookahead)
     "zero": ({}, 0), "low": ({}, 128), "hq": ({}, 512), "ai": ({"ZD_AI": "1"}, 480)}
+MODES["ai"] = ({"ZD_AI": "1"}, 480)                          # with hiss assist (default)
+MODES["ai_pure"] = ({"ZD_AI": "1", "ZD_AI_PURE": "1"}, 480)  # network gains only
 AMOUNT = os.environ.get("AMOUNT", "0.7")
 
 
@@ -64,4 +66,4 @@ if __name__ == "__main__":
     if os.environ.get("VERBOSE"):
         for c, nn, s, m in sorted(res, key=lambda r: (r[1], r[2], r[0])):
             print(f"{nn:18s} {s:2d}dB {c:7s} " + " ".join(f"{k}={m[k]:.2f}" for k in keys))
-    json.dump(res, open(f"cpp_results_{AMOUNT}.json", "w"))
+    json.dump(res, open(f"cpp_results_{AMOUNT}_{'_'.join(modes)}.json", "w"))
