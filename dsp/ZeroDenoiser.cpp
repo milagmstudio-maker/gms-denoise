@@ -76,6 +76,8 @@ void ZeroDenoiser::reset()
     hist.assign(nCh, std::vector<float>(2 * kTaps, 0.0f));
     histPos = 0;
     hopCount = 0;
+    delay.assign(nCh, std::vector<float>(kMaxLookahead + 1, 0.0f));
+    delayPos = 0;
     curRev.assign(kTaps, 0.0f);
     curRev[kTaps - 1] = 1.0f; // unity (reversed)
     nextRev = curRev;
@@ -89,6 +91,14 @@ void ZeroDenoiser::reset()
     frames = 0;
 }
 
+void ZeroDenoiser::setLookahead(int samples)
+{
+    samples = std::clamp(samples, 0, kMaxLookahead);
+    if (samples == lookahead) return;
+    lookahead = samples;
+    for (auto& d : delay) std::fill(d.begin(), d.end(), 0.0f);
+}
+
 void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 {
     const int nc = std::min(numChannels, nCh);
@@ -98,9 +108,19 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
         for (int c = 0; c < nc; ++c) {
             const float x = ch[c][n];
             mono += x;
-            hist[c][histPos] = x;
-            hist[c][histPos + kTaps] = x;
+            float xd = x;
+            if (lookahead > 0 && c < (int) delay.size()) {
+                auto& d = delay[c];
+                const int size = (int) d.size();
+                d[delayPos] = x;
+                int r = delayPos - lookahead;
+                if (r < 0) r += size;
+                xd = d[r];
+            }
+            hist[c][histPos] = xd;
+            hist[c][histPos + kTaps] = xd;
         }
+        if (lookahead > 0 && !delay.empty()) delayPos = (delayPos + 1) % (int) delay[0].size();
         histPos = (histPos + 1) % kTaps;
         anaBuf[anaPos] = mono * invC;
         anaBuf[anaPos + kFFT] = mono * invC;

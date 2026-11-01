@@ -35,6 +35,13 @@ public:
     void prepare(double sampleRate, int numChannels);
     void reset();
     void setParams(const DenoiserParams& p) { params = p; }
+
+    // Lookahead (samples): the audio is delayed by this much while the analysis
+    // runs on the undelayed input, so gains are decided with that much "future".
+    // 0 = true zero latency. Reported plugin latency must equal this value.
+    static constexpr int kMaxLookahead = 1024;
+    void setLookahead(int samples);
+    int getLookahead() const { return lookahead; }
     const DenoiserParams& getParams() const { return params; }
 
     // In-place processing of non-interleaved channels. Any block size.
@@ -56,6 +63,8 @@ private:
     // per-channel FIR history, doubled ring for contiguous reads
     std::vector<std::vector<float>> hist; int histPos = 0;
     int hopCount = 0;
+    int lookahead = 0;
+    std::vector<std::vector<float>> delay; int delayPos = 0;
 
     // filters (stored time-reversed for direct dot products)
     std::vector<float> curRev, nextRev;

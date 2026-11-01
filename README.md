@@ -57,7 +57,7 @@ Xinerama, Xcursor, Xcomposite, Freetype, Fontconfig, GL dev packages).
 - FFT sizes are fixed in samples and tuned at 48 kHz. At 88.2/96 kHz the
   frequency resolution halves, so the sizes still need to scale with sample rate.
 - Versus the 21 ms STFT reference (5 dB SNR): noise in pauses is reduced as much or more, but speech onsets lose 2 to 4 dB more and STOI is 0.02 to 0.04 lower. See `prototype/results_v3.txt`.
-- A high-quality mode (STFT, about 21 ms latency) is planned.
+- Modes: Zero latency (0 samples), Low latency (128 samples, 2.7 ms at 48 kHz), High quality (512 samples, 10.7 ms). Lookahead delays the audio while analysis runs on the undelayed input. The editor always shows the current latency in ms and samples.
 - Licensing: JUCE 8 is dual-licensed (AGPLv3 or the JUCE commercial licence).
   Check the JUCE terms before distributing closed-source builds. The VST3 SDK
   has been MIT-licensed since VST 3.8.

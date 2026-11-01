@@ -19,25 +19,43 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     output.setColour(juce::Slider::rotarySliderFillColourId, dim);
     addAndMakeVisible(output);
 
-    for (auto* l : { &amountLabel, &outputLabel, &latencyLabel }) {
+    mode.addItemList(ZeroDenoiseProcessor::modeNames(), 1);
+    addAndMakeVisible(mode);
+    modeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "mode", mode);
+
+    for (auto* l : { &amountLabel, &outputLabel, &latencyLabel, &modeLabel }) {
         l->setJustificationType(juce::Justification::centred);
         l->setColour(juce::Label::textColourId, dim);
         addAndMakeVisible(l);
     }
     amountLabel.setText("NOISE REDUCTION", juce::dontSendNotification);
     outputLabel.setText("OUTPUT", juce::dontSendNotification);
-    latencyLabel.setText("latency: 0 samples", juce::dontSendNotification);
+    modeLabel.setText("MODE", juce::dontSendNotification);
+    latencyLabel.setJustificationType(juce::Justification::centredRight);
+    latencyLabel.setFont(juce::FontOptions(16.0f, juce::Font::bold));
+    latencyLabel.setColour(juce::Label::textColourId, accent);
 
     for (auto& s : shown) s = 0.0f;
     setSize(520, 340);
+    refresh(true);
     startTimerHz(30);
 }
 
-void ZeroDenoiseEditor::timerCallback()
+void ZeroDenoiseEditor::timerCallback() { refresh(false); }
+
+void ZeroDenoiseEditor::refresh(bool immediate)
 {
+    const int lat = proc.latencyForUi.load();
+    const float sr = proc.sampleRateForUi.load();
+    if (lat != shownLatency || sr != shownRate) {
+        shownLatency = lat; shownRate = sr;
+        const double ms = 1000.0 * lat / (sr > 0 ? sr : 48000.0f);
+        latencyLabel.setText("LATENCY  " + juce::String(ms, 1) + " ms  (" + juce::String(lat) + " smp)",
+                             juce::dontSendNotification);
+    }
     for (size_t b = 0; b < shown.size(); ++b) {
         const float v = proc.meter[b].load(std::memory_order_relaxed);
-        shown[b] = v < shown[b] ? v : shown[b] + 0.25f * (v - shown[b]);
+        shown[b] = (immediate || v < shown[b]) ? v : shown[b] + 0.25f * (v - shown[b]);
     }
     repaint(meterArea);
 }
@@ -68,14 +86,17 @@ void ZeroDenoiseEditor::paint(juce::Graphics& g)
 void ZeroDenoiseEditor::resized()
 {
     auto area = getLocalBounds().reduced(16);
-    area.removeFromTop(32);
+    auto top = area.removeFromTop(32);
+    latencyLabel.setBounds(top.removeFromRight(280));
     meterArea = area.removeFromTop(110);
     area.removeFromTop(10);
     auto left = area.removeFromLeft(area.getWidth() * 2 / 3);
     amountLabel.setBounds(left.removeFromTop(18));
     amount.setBounds(left.reduced(10, 0));
     auto right = area;
+    modeLabel.setBounds(right.removeFromTop(18));
+    mode.setBounds(right.removeFromTop(26).reduced(6, 0));
+    right.removeFromTop(8);
     outputLabel.setBounds(right.removeFromTop(18));
-    latencyLabel.setBounds(right.removeFromBottom(18));
-    output.setBounds(right.reduced(20, 10));
+    output.setBounds(right.reduced(10, 0));
 }

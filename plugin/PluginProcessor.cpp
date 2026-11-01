@@ -10,6 +10,7 @@ ZeroDenoiseProcessor::ZeroDenoiseProcessor()
 {
     amountParam = apvts.getRawParameterValue("amount");
     outputParam = apvts.getRawParameterValue("output");
+    modeParam = apvts.getRawParameterValue("mode");
     for (auto& m : meter) m.store(0.0f);
 }
 
@@ -23,6 +24,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ZeroDenoiseProcessor::create
     p.push_back(std::make_unique<AudioParameterFloat>(
         ParameterID { "output", 1 }, "Output", NormalisableRange<float>(-12.0f, 12.0f, 0.1f), 0.0f,
         AudioParameterFloatAttributes().withLabel("dB")));
+    p.push_back(std::make_unique<AudioParameterChoice>(
+        ParameterID { "mode", 1 }, "Mode", modeNames(), 0));
     return { p.begin(), p.end() };
 }
 
@@ -36,7 +39,7 @@ bool ZeroDenoiseProcessor::isBusesLayoutSupported(const BusesLayout& layouts) co
 void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int)
 {
     denoiser.prepare(sampleRate, getTotalNumOutputChannels());
-    setLatencySamples(0);
+    applyMode();
     outGain.reset(sampleRate, 0.02);
     outGain.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(outputParam->load()));
     sampleRateForUi.store((float) sampleRate);
@@ -50,12 +53,24 @@ void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int)
     }
 }
 
+void ZeroDenoiseProcessor::applyMode()
+{
+    const int mode = juce::jlimit(0, 2, (int) modeParam->load());
+    const int la = kModeLookahead[mode];
+    if (la != denoiser.getLookahead() || getLatencySamples() != la) {
+        denoiser.setLookahead(la);
+        setLatencySamples(la); // host re-aligns tracks (plugin delay compensation)
+    }
+    latencyForUi.store(la);
+}
+
 void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numCh = getTotalNumOutputChannels();
     for (int c = getTotalNumInputChannels(); c < numCh; ++c) buffer.clear(c, 0, buffer.getNumSamples());
 
+    applyMode();
     zd::DenoiserParams p = denoiser.getParams();
     p.amount = amountParam->load() * 0.01f;
     denoiser.setParams(p);

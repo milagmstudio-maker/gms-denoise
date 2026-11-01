@@ -2,6 +2,7 @@
 // reported latency, parameter list, processing and state round-trip.
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <random>
+#include <cstdlib>
 
 int main(int argc, char** argv)
 {
@@ -26,8 +27,20 @@ int main(int argc, char** argv)
     auto params = inst->getParameters();
     juce::StringArray names;
     for (auto* p : params) names.add(p->getName(32));
-    check(names.contains("Amount") && names.contains("Output"), "parameters: " + names.joinIntoString(", "));
+    check(names.contains("Amount") && names.contains("Output") && names.contains("Mode"), "parameters: " + names.joinIntoString(", "));
 
+    // mode -> High quality: host must see the new latency
+    juce::AudioProcessorParameter* mp = nullptr;
+    for (auto* p : params) if (p->getName(32) == "Mode") mp = p;
+    if (mp != nullptr) {
+        mp->setValueNotifyingHost(1.0f);
+        juce::AudioBuffer<float> b(2, 256); juce::MidiBuffer m; b.clear();
+        inst->processBlock(b, m);
+        check(inst->getLatencySamples() == 512, "High quality mode reports latency " + juce::String(inst->getLatencySamples()));
+        mp->setValueNotifyingHost(0.0f);
+        inst->processBlock(b, m);
+        check(inst->getLatencySamples() == 0, "back to Zero latency mode reports " + juce::String(inst->getLatencySamples()));
+    }
     // amount -> 100 %
     params[0]->setValueNotifyingHost(1.0f);
     std::mt19937 rng(1);

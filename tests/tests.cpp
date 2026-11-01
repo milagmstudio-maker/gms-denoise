@@ -74,6 +74,26 @@ static void testTransparentAtZero()
     CHECK(e < 1e-4, "amount=0 is sample-exact passthrough, zero latency (max err %.2e)", e);
 }
 
+static void testLookaheadIsExactDelay()
+{
+    for (int D : { 128, 512 }) {
+        zd::ZeroDenoiser d;
+        d.prepare(48000, 1);
+        zd::DenoiserParams p; p.amount = 0.0f;
+        d.setParams(p);
+        d.setLookahead(D);
+        std::vector<float> x(20000), y;
+        std::mt19937 rng(4);
+        std::normal_distribution<float> nd(0.f, 0.1f);
+        for (auto& v : x) v = nd(rng);
+        y = x;
+        run(d, y, 0);
+        double e = 0;
+        for (size_t i = (size_t) D; i < x.size(); ++i) e = std::max(e, (double) std::abs(y[i] - x[i - (size_t) D]));
+        CHECK(e < 1e-6 && d.getLookahead() == D, "lookahead %d = exact %d-sample delay (max err %.2e)", D, D, e);
+    }
+}
+
 static void testBlockSizeIndependence()
 {
     std::vector<float> x(96000);
@@ -149,6 +169,7 @@ int main()
 {
     testFFT();
     testTransparentAtZero();
+    testLookaheadIsExactDelay();
     testBlockSizeIndependence();
     testNoiseReduction();
     testOnsetPreserved();

@@ -38,6 +38,11 @@ public:
     // gain reduction per log-spaced band in dB (written on audio thread, read by UI)
     std::array<std::atomic<float>, kMeterBands> meter {};
     std::atomic<float> sampleRateForUi { 48000.0f };
+    std::atomic<int> latencyForUi { 0 };
+
+    // Mode -> lookahead in samples (signal delay reported to the host)
+    static constexpr int kModeLookahead[3] = { 0, 128, 512 };
+    static juce::StringArray modeNames() { return { "Zero latency", "Low latency", "High quality" }; }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -46,6 +51,8 @@ private:
     zd::ZeroDenoiser denoiser;
     std::atomic<float>* amountParam = nullptr;
     std::atomic<float>* outputParam = nullptr;
+    std::atomic<float>* modeParam = nullptr;
+    void applyMode();
     juce::SmoothedValue<float> outGain;
     std::array<int, kMeterBands + 1> meterEdges {};
 

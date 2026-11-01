@@ -10,11 +10,15 @@ public:
 
 private:
     void timerCallback() override;
+    void refresh(bool immediate);
 
     ZeroDenoiseProcessor& proc;
     juce::Slider amount, output;
-    juce::Label amountLabel, outputLabel, latencyLabel;
+    juce::Label amountLabel, outputLabel, latencyLabel, modeLabel;
+    juce::ComboBox mode;
     juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
+    int shownLatency = -1; float shownRate = 0.0f;
     std::array<float, ZeroDenoiseProcessor::kMeterBands> shown {};
     juce::Rectangle<int> meterArea;
 
