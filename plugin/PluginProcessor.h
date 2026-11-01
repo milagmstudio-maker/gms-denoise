@@ -59,6 +59,7 @@ private:
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* learnParam = nullptr;
     std::atomic<float>* adaptParam = nullptr;
+    std::atomic<float>* voiceParam = nullptr;
     void applyMode();
     juce::SmoothedValue<float> outGain;
     std::array<int, kMeterBands + 1> meterEdges {};

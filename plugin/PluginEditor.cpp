@@ -28,6 +28,11 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     adaptive.setColour(juce::ToggleButton::tickColourId, accent);
     addAndMakeVisible(adaptive);
     adaptAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "adaptive", adaptive);
+    voiceProtect.setColour(juce::ToggleButton::textColourId, dim);
+    voiceProtect.setColour(juce::ToggleButton::tickColourId, accent);
+    voiceProtect.setTooltip("AI mode: also keep quieter screams and shouts. Background chatter is removed less.");
+    addAndMakeVisible(voiceProtect);
+    voiceAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "voiceprotect", voiceProtect);
 
     mode.addItemList(ZeroDenoiseProcessor::modeNames(), 1);
     addAndMakeVisible(mode);
@@ -72,6 +77,8 @@ void ZeroDenoiseEditor::refresh(bool immediate)
         latencyLabel.setText("LATENCY  " + juce::String(ms, 1) + " ms  (" + juce::String(lat) + " smp)",
                              juce::dontSendNotification);
     }
+    const bool ai = proc.isAiMode(); // the switch only acts in AI mode
+    if (voiceProtect.isEnabled() != ai) { voiceProtect.setEnabled(ai); voiceProtect.setAlpha(ai ? 1.0f : 0.4f); }
     for (size_t b = 0; b < shown.size(); ++b) {
         const float v = proc.meter[b].load(std::memory_order_relaxed);
         shown[b] = (immediate || v < shown[b]) ? v : shown[b] + 0.25f * (v - shown[b]);
@@ -119,7 +126,8 @@ void ZeroDenoiseEditor::resized()
     right.removeFromTop(6);
     modeLabel.setBounds(right.removeFromTop(18));
     mode.setBounds(right.removeFromTop(26).reduced(6, 0));
-    right.removeFromTop(8);
+    voiceProtect.setBounds(right.removeFromTop(24).reduced(4, 0));
+    right.removeFromTop(4);
     outputLabel.setBounds(right.removeFromTop(18));
     output.setBounds(right.reduced(10, 0));
 }

@@ -159,3 +159,11 @@ speech-component change -0.77 -> -0.01 dB.
 Cost, measured on the 14-noise set: pause attenuation -24.0 -> -19.1 dB, OVRL 2.92 -> 2.87; mainly
 cafe (-32 -> -14 dB) and hallway/traffic, because background voices now count as voices.
 Gate 4..12 (env ZD_RLO/ZD_RHI) is the middle ground: scream -0.08 dB, cafe -21 dB.
+
+### Strong voice protect switch (v0.9.1)
+
+Protecting every scream frame and removing background chatter pull in opposite directions, so
+the gate is now a user switch (parameter `voiceprotect`, "Strong voice protect", AI mode only).
+Off (default): gate 4..12 x floor, ~93 of 8448 loud scream frames cut >6 dB, cafe pauses -21 dB.
+On: gate 3..8, ~61 frames cut, cafe pauses -14 dB. Use On for screaming / shouting content in
+quiet-ish noise; Off when other people talk in the background.

@@ -29,7 +29,7 @@ int main(int argc, char** argv)
     auto params = inst->getParameters();
     juce::StringArray names;
     for (auto* p : params) names.add(p->getName(32));
-    check(names.contains("Amount") && names.contains("Output") && names.contains("Mode"), "parameters: " + names.joinIntoString(", "));
+    check(names.contains("Amount") && names.contains("Output") && names.contains("Mode") && names.contains("Strong Voice Protect"), "parameters: " + names.joinIntoString(", "));
 
     juce::AudioProcessorParameter* mp = nullptr;
     for (auto* p : params) if (p->getName(32) == "Mode") mp = p;

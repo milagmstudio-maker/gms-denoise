@@ -444,7 +444,8 @@ void ZeroDenoiser::analyseAi()
         const double r = computeVoicing();
         lastVoicing = r;
         // periodic AND clearly above the noise floor (pauses: resid < 0.5)
-        const double gate = std::clamp((lastResid - residLo) / (residHi - residLo), 0.0, 1.0);
+        const double rl = params.aiStrongVoice ? 3.0 : residLo, rh = params.aiStrongVoice ? 8.0 : residHi;
+        const double gate = std::clamp((lastResid - rl) / (rh - rl), 0.0, 1.0);
         const double vp = std::clamp((std::min(r, 1.0) - voiceLo) / (voiceHi - voiceLo), 0.0, 1.0) * gate;
         // loud onsets (also unvoiced) well above the noise: protect from the first hop
         const double vo = dbgOnset ? fastVad * gate : 0.0;

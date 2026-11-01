@@ -13,6 +13,7 @@ ZeroDenoiseProcessor::ZeroDenoiseProcessor()
     modeParam = apvts.getRawParameterValue("mode");
     learnParam = apvts.getRawParameterValue("learn");
     adaptParam = apvts.getRawParameterValue("adaptive");
+    voiceParam = apvts.getRawParameterValue("voiceprotect");
     for (auto& m : meter) m.store(0.0f);
 }
 
@@ -30,6 +31,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ZeroDenoiseProcessor::create
         ParameterID { "mode", 1 }, "Mode", modeNames(), 0));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "learn", 1 }, "Learn", false));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "adaptive", 1 }, "Adaptive", true));
+    p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "voiceprotect", 1 }, "Strong Voice Protect", false));
     return { p.begin(), p.end() };
 }
 
@@ -80,6 +82,7 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     p.amount = amountParam->load() * 0.01f;
     p.learn = learnParam->load() > 0.5f;
     p.adaptive = adaptParam->load() > 0.5f;
+    p.aiStrongVoice = voiceParam->load() > 0.5f;
     p.ai = aiModeForUi.load();
     denoiser.setParams(p);
     denoiser.process(buffer.getArrayOfWritePointers(), numCh, buffer.getNumSamples());

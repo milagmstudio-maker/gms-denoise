@@ -18,7 +18,8 @@ private:
     juce::ComboBox mode;
     juce::TextButton learn { "LEARN" };
     juce::ToggleButton adaptive { "Adaptive" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt;
+    juce::ToggleButton voiceProtect { "Strong voice protect" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt, voiceAtt;
     int blink = 0;
     juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;

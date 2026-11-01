@@ -28,6 +28,7 @@ struct DenoiserParams {
     bool ai = false;       // gains from the RNNoise network instead of the DSP estimator
     bool aiHissAssist = true; // AI mode: DSP estimator adds attenuation for stationary noise (hiss)
     bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
+    bool aiStrongVoice = false; // AI mode: protect quieter voices too (screams fully kept, more background chatter survives)
 };
 
 class ZeroDenoiser {
@@ -130,7 +131,7 @@ private:
     // periodicity 0.6..0.95, above-noise power 3..8 x (2 x 2 x min-statistics floor),
     // full protection from half confidence. Lower = screams fully kept but more
     // background chatter survives (prototype/expreval.py vs cppeval.py, v0.9).
-    double voiceLo = 0.6, voiceHi = 0.95, residLo = 3.0, residHi = 8.0;
+    double voiceLo = 0.6, voiceHi = 0.95, residLo = 4.0, residHi = 12.0; // Strong: 3..8
 public:
     double dbgSat = 2.0; bool dbgOnset = true, dbgNoHold = false; // tuning hooks (zd_cli env)
 private:
