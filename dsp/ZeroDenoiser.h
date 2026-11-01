@@ -65,6 +65,7 @@ private:
     void designMinPhase(const float* gain, float* hOut);
     void analyseAi();        // AI mode: filter from the latest network gains
     void computeDspGain(float* out); // DSP estimator, one hop
+    void updateFloor();              // minimum-statistics noise floor (voice guard reference)
     double computeVoicing();         // 0..1 periodicity of the above-noise signal (300 Hz-5 kHz, f0 100-1600 Hz)
 
     DenoiserParams params;
@@ -110,11 +111,26 @@ private:
     std::vector<FFT::cpx> acSpec;
     double voiced = 0.0, aVoiceRel = 0.0, lastVoicing = 0.0, lastResid = 0.0;
     long maxVoiceHoldHops = 0, settleFrames = 0;
+    // Minimum-statistics floor: min over 6 sub-windows of 0.5 s of a 30 ms smoothed
+    // periodogram. A scream cannot raise it for ~3 s, unlike the adaptive tracker.
+    static constexpr int kFloorSubs = 6;
+    std::vector<double> pSlow, subMin, floorN;
+    std::vector<std::vector<double>> floorRing;
+    int floorRingPos = 0; long floorHop = 0, floorSubLen = 0; int floorFilled = 0;
+    double aSlow = 0.0;
+    std::vector<float> gFloor;
+    double tailEnv = 0.0, aTail = 0.0, voicedP = 0.0, onsetEnv = 0.0;
+    int lastLag = 0, combLag = 0;
+    float gDspRawSafe(int) const { return 1.0f; } // tail floor is flat (bins above the voice are masked by it)
+public:
+    bool dbgFloor = true, dbgComb = true; double floorBias = 2.0, dbgTail = 0.25;
+private:
     double holdBudget = 0.0;
     // Voice guard tuning (prototype/expreval.py + cppeval.py, 2026-11-01):
-    // periodicity 0.6..0.95, above-noise power 4..12 x (2x noise floor) so quiet
-    // background voices (babble) are not protected, full protection from half confidence.
-    double voiceLo = 0.6, voiceHi = 0.95, residLo = 4.0, residHi = 12.0;
+    // periodicity 0.6..0.95, above-noise power 3..8 x (2 x 2 x min-statistics floor),
+    // full protection from half confidence. Lower = screams fully kept but more
+    // background chatter survives (prototype/expreval.py vs cppeval.py, v0.9).
+    double voiceLo = 0.6, voiceHi = 0.95, residLo = 3.0, residHi = 8.0;
 public:
     double dbgSat = 2.0; bool dbgOnset = true, dbgNoHold = false; // tuning hooks (zd_cli env)
 private:

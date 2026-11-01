@@ -78,6 +78,9 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aFastRel = std::exp(-frameT / 0.03);
     aPs = std::exp(-frameT / 0.004);
     aRel = std::exp(-frameT / 0.02);
+    aSlow = std::exp(-frameT / 0.03);
+    aTail = std::exp(-frameT / 0.15);
+    floorSubLen = (long) (0.5 / frameT);
     aVoiceRel = std::exp(-frameT / 0.015); // short release: noise must not leak after a word ends
     maxVoiceHoldHops = (long) (2.0 / frameT);
     // window autocorrelation, to undo the Hann taper's bias on long lags
@@ -105,6 +108,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     gainOut.assign(nBins, 1.0f);
     gAi.assign(nBins, 1.0f);
     gDsp.assign(nBins, 1.0f);
+    gFloor.assign(nBins, 1.0f);
     hTmp.assign(nTaps, 0.0f);
     graw.assign(nBins, 0.0);
     ps.assign(nFast / 2 + 1, 0.0);
@@ -144,6 +148,12 @@ void ZeroDenoiser::reset()
     aiVad = 0.0;
     voiced = 0.0;
     holdBudget = (double) maxVoiceHoldHops;
+    tailEnv = 0.0; voicedP = 0.0; onsetEnv = 0.0; combLag = 0; lastLag = 0;
+    pSlow.assign(nBins, 0.0);
+    subMin.assign(nBins, 1e300);
+    floorN.assign(nBins, 0.0);
+    floorRing.assign(kFloorSubs, std::vector<double>(nBins, 1e300));
+    floorRingPos = 0; floorHop = 0; floorFilled = 0;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
@@ -355,12 +365,41 @@ void ZeroDenoiser::computeDspGain(float* out)
     }
 }
 
+void ZeroDenoiser::updateFloor()
+{
+    // psm (4 ms smoothed periodogram) is updated by computeDspGain this hop.
+    // Nothing is tracked during warm-up (the analysis buffer still holds the
+    // initial zeros); the floor is valid once the first 0.5 s window completes.
+    if (frames <= warmFrames) return;
+    const bool first = floorHop == 0;
+    for (int k = 0; k < nBins; ++k) {
+        pSlow[k] = first ? psm[k] : aSlow * pSlow[k] + (1.0 - aSlow) * psm[k];
+        subMin[k] = std::min(subMin[k], pSlow[k]);
+    }
+    ++floorHop;
+    if (floorHop % floorSubLen != 0) return;
+    if (floorFilled == 0) {
+        for (auto& slot : floorRing) slot = subMin; // first window fills the whole ring
+    } else {
+        floorRing[(size_t) floorRingPos] = subMin;
+    }
+    floorRingPos = (floorRingPos + 1) % kFloorSubs;
+    floorFilled = std::min(floorFilled + 1, kFloorSubs);
+    std::fill(subMin.begin(), subMin.end(), 1e300);
+    for (int k = 0; k < nBins; ++k) {
+        double m = 1e300;
+        for (int j = 0; j < kFloorSubs; ++j) m = std::min(m, floorRing[(size_t) j][(size_t) k]);
+        floorN[k] = m;
+    }
+}
+
 double ZeroDenoiser::computeVoicing()
 {
     // Normalised autocorrelation of the part of the signal that stands above the
     // tracked (stationary) noise floor, 300 Hz-5 kHz. Pitched voice - including
     // screams and very high voices the network was not trained on - gives a
     // strong peak at the pitch period; hiss, hum, fans and clatter do not.
+    if (dbgFloor && floorFilled == 0) { lastResid = 0.0; return 0.0; }
     const float* x = anaBuf.data() + anaPos;
     for (int i = 0; i < nFFT; ++i) acBuf[i] = x[i] * winLong[i];
     std::fill(acBuf.begin() + nFFT, acBuf.end(), 0.0f);
@@ -370,7 +409,8 @@ double ZeroDenoiser::computeVoicing()
         float v = 0.0f;
         if (k >= acKLo && k < acKHi) {
             const double P = (double) std::norm(acSpec[k]);
-            const double nz = 2.0 * noise[(size_t) std::min(k / 2, nBins - 1)];
+            const size_t kk = (size_t) std::min(k / 2, nBins - 1);
+            const double nz = dbgFloor ? 2.0 * floorBias * floorN[kk] : 2.0 * noise[kk];
             v = (float) std::max(P - nz, 0.0);
             tot += v;
             ntot += nz;
@@ -384,6 +424,12 @@ double ZeroDenoiser::computeVoicing()
     if (r0 <= 0.0) return 0.0;
     double best = 0.0;
     for (int t = lagMin; t <= lagMax; ++t) best = std::max(best, (double) acBuf[t] / (r0 * winAc[t]));
+    // pitch period: the shortest local peak within 10 % of the best (avoids sub-harmonics)
+    lastLag = 0;
+    for (int t = lagMin + 1; t < lagMax; ++t) {
+        const double a = (double) acBuf[t] / (r0 * winAc[t]);
+        if (a >= 0.9 * best && acBuf[t] >= acBuf[t - 1] && acBuf[t] >= acBuf[t + 1]) { lastLag = t; break; }
+    }
     return best;
 }
 
@@ -394,14 +440,18 @@ void ZeroDenoiser::analyseAi()
     // (hiss, hum, fans) that the network often leaves in.
     if (assist || guard) computeDspGain(gDsp.data());
     if (guard) {
+        updateFloor();
         const double r = computeVoicing();
         lastVoicing = r;
         // periodic AND clearly above the noise floor (pauses: resid < 0.5)
         const double gate = std::clamp((lastResid - residLo) / (residHi - residLo), 0.0, 1.0);
-        double v = std::clamp((std::min(r, 1.0) - voiceLo) / (voiceHi - voiceLo), 0.0, 1.0) * gate;
+        const double vp = std::clamp((std::min(r, 1.0) - voiceLo) / (voiceHi - voiceLo), 0.0, 1.0) * gate;
         // loud onsets (also unvoiced) well above the noise: protect from the first hop
-        if (dbgOnset) v = std::max(v, fastVad * gate);
-        voiced = v > voiced ? v : aVoiceRel * voiced + (1.0 - aVoiceRel) * v;
+        const double vo = dbgOnset ? fastVad * gate : 0.0;
+        if (vp > 0.0 && lastLag > 0) combLag = lastLag;
+        voicedP = vp > voicedP ? vp : aVoiceRel * voicedP + (1.0 - aVoiceRel) * vp;
+        onsetEnv = vo > onsetEnv ? vo : aVoiceRel * onsetEnv + (1.0 - aVoiceRel) * vo;
+        voiced = std::max(voicedP, onsetEnv);
     }
     if (aiNew) {
         aiNew = false;
@@ -438,11 +488,43 @@ void ZeroDenoiser::analyseAi()
             gain[k] = d < a ? a * (float) std::exp(w * std::log(std::max((double) d / a, kCap))) : a;
         }
     }
+    if (guard && dbgTail > 0.0) {
+        // Voice tail: after a guarded voice the network may not gate the decay or
+        // breath to silence at once; the floor falls from -12 dB over ~150 ms.
+        tailEnv = std::max(std::min(1.0, voiced * dbgSat), aTail * tailEnv);
+        const float t = (float) (dbgTail * tailEnv);
+        if (t > 1e-4f) for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], std::min(t, gDspRawSafe(k)));
+    }
     if (guard && voiced > 0.0) {
         // Voice guard: while a pitched voice is present the network may not cut
         // below the DSP (stationary-noise) gain.
         const float vg = (float) std::min(1.0, voiced * dbgSat);
-        for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], vg * gDsp[k]);
+        if (dbgFloor) {
+            // protective gain against the long-term floor (a scream cannot raise it),
+            // softened like the DSP gain during speech
+            // Pitched part protects only the bins at the detected voice's harmonics, so a
+            // background voice or clatter between them is still removed; onsets are broadband.
+            const float vpg = (float) std::min(1.0, voicedP * dbgSat), vog = (float) std::min(1.0, onsetEnv * dbgSat);
+            const double binHz = fs / nFFT;
+            const double f0 = combLag > 0 ? fs / combLag : 0.0;
+            const bool useComb = dbgComb && f0 > 3.0 * binHz;
+            for (int k = 0; k < nBins; ++k) {
+                const double q = 1.0 - 2.0 * floorBias * floorN[k] / std::max(psm[k], 1e-20);
+                gFloor[k] = (float) std::sqrt(std::clamp(q, 0.0, 1.0));
+                float w = vpg;
+                if (useComb) {
+                    const double f = k * binHz;
+                    const double h = std::max(1.0, std::round(f / f0));
+                    const double tol = 1.5 + 0.5 * h * (fs / ((double) combLag * combLag)) / binHz;
+                    const double dist = std::abs(f - h * f0) / binHz;
+                    w = dist <= tol ? vpg : (dist <= tol + 1.0 ? vpg * (float) (tol + 1.0 - dist) : 0.0f);
+                }
+                w = std::max(w, vog);
+                gain[k] = std::max(gain[k], w * std::max(gDsp[k], gFloor[k]));
+            }
+        } else {
+            for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], vg * gDsp[k]);
+        }
     }
     for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());

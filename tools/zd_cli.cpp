@@ -21,6 +21,10 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_AI_PURE")) { p.aiHissAssist = false; p.aiVoiceGuard = false; }
     if (std::getenv("ZD_NOGUARD")) p.aiVoiceGuard = false;
     if (std::getenv("ZD_ACLO")) d.setVoicingBand(std::atof(std::getenv("ZD_ACLO")));
+    if (std::getenv("ZD_TAIL")) d.dbgTail = std::atof(std::getenv("ZD_TAIL"));
+    if (std::getenv("ZD_NOCOMB")) d.dbgComb = false;
+    if (std::getenv("ZD_NOFLOOR")) d.dbgFloor = false;
+    if (std::getenv("ZD_FBIAS")) d.floorBias = std::atof(std::getenv("ZD_FBIAS"));
     if (std::getenv("ZD_NOHOLD")) d.dbgNoHold = true;
     if (std::getenv("ZD_GSAT")) d.dbgSat = std::atof(std::getenv("ZD_GSAT"));
     if (std::getenv("ZD_GONSET")) d.dbgOnset = true;

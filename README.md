@@ -141,3 +141,21 @@ second). Release 15 ms so noise does not leak after a word ends. Quiet backgroun
 Real-noise set (14 noises): OVRL 2.92 (v0.7 2.94), pause -23.9 dB (v0.7 -25.2), LSD 2.05
 (2.51). Car pauses are the main cost (-13 vs -27 dB in v0.7, still better than Zero latency).
 Quiet speech onsets buried in 5-10 dB SNR noise are unchanged (-13 dB first 20 ms; HQ mode -6).
+
+## Voice guard v0.9 (2026-11-01)
+
+The user still heard parts of screams vanish in v0.8. Frame audit (`prototype/scream_frames.py`,
+4 speakers x 4 noises): 672 of 8448 loud scream frames were cut by more than 6 dB, almost all in
+long screams. Cause: the guard measured "above the noise" against the adaptive tracker, which
+catches up with a sustained scream, so the guard released.
+
+v0.9: the guard's reference is a separate minimum-statistics floor (min over 6 x 0.5 s of a
+30 ms smoothed periodogram, x2 bias), which a scream cannot raise for ~3 s; the protective gain
+is computed against it too; gate 3..8 x the floor; pitched protection is limited to the
+detected voice's harmonics (onsets stay broadband); a short tail floor (-12 dB, 150 ms).
+Result: cut frames 672 -> about 60 (the rest are breath/decay at noise level), scream
+speech-component change -0.77 -> -0.01 dB.
+
+Cost, measured on the 14-noise set: pause attenuation -24.0 -> -19.1 dB, OVRL 2.92 -> 2.87; mainly
+cafe (-32 -> -14 dB) and hallway/traffic, because background voices now count as voices.
+Gate 4..12 (env ZD_RLO/ZD_RHI) is the middle ground: scream -0.08 dB, cafe -21 dB.
