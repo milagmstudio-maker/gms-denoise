@@ -86,7 +86,9 @@ private:
     std::vector<float> gain, gainOut, hTmp;
     std::vector<int> bandEdges;
     std::vector<double> fnoise, graw, ps, psm, gRel;
-    double vad = 0.0, aRel = 0.0, aVadRel = 0.0;
+    double vad = 0.0, aRel = 0.0, aVadRel = 0.0, fastVad = 0.0;
+    int fastVadLo = 0, fastVadHi = 0, hfStartBin = 0;
+    static constexpr double kHfFloor = 0.25118864315095801; // -12 dB
     long frames = 0;
     int warmFrames = 0;
     double aNoise = 0, aP = 0, aDD = 0, aFastRel = 0, aPs = 0, aLearn = 0;

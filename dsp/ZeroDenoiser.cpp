@@ -55,6 +55,13 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
         bandEdges.push_back(std::min(nbs - 1, bandEdges.back() + w));
     }
 
+    {
+        const int lo = (int) (100.0 / sampleRate * nFast), hi = (int) (4000.0 / sampleRate * nFast);
+        fastVadLo = (int) (std::lower_bound(bandEdges.begin(), bandEdges.end(), lo) - bandEdges.begin());
+        fastVadHi = (int) (std::lower_bound(bandEdges.begin(), bandEdges.end(), hi) - bandEdges.begin());
+        hfStartBin = (int) (7000.0 / sampleRate * nFFT);
+    }
+
     // Time constants are defined in seconds so they don't depend on hop/fs.
     // Values are tuned at 48 kHz with the fixed FFT sizes above.
     const double frameT = hop / fs;
@@ -101,6 +108,7 @@ void ZeroDenoiser::reset()
     psm.assign(nBins, 0.0);
     gRel.assign(nBins, 1.0);
     vad = 0.0;
+    fastVad = 0.0;
     learnFrames = 0;
     fnoise.assign(bandEdges.size() - 1, 0.0);
     frames = 0;
@@ -216,11 +224,11 @@ void ZeroDenoiser::analyse()
         int cnt = 0;
         for (int k = k0; k < k1; ++k) cnt += graw[k] > 0.5 ? 1 : 0; // xi > 1
         const double frac = (double) cnt / (double) std::max(1, k1 - k0);
-        const double v = std::clamp((frac - 0.05) / 0.15, 0.0, 1.0);
+        const double v = std::max(std::clamp((frac - 0.05) / 0.15, 0.0, 1.0), fastVad); // fast path: previous hop
         vad = v > vad ? v : aVadRel * vad + (1.0 - aVadRel) * v;
         const double ge = 1.0 * (1.0 - vad) + 0.5 * vad;
         if (ge != 1.0)
-            for (int k = 0; k < nBins; ++k) graw[k] = std::pow(graw[k], ge);
+            for (int k = 0; k < nBins; ++k) graw[k] = (double) std::exp((float) ge * std::log((float) std::max(graw[k], 1e-12)));
     }
 
     // 3-tap spectral smoothing (zero-padded edges), then prevS update
@@ -242,6 +250,7 @@ void ZeroDenoiser::analyse()
         const int nbs = nFast / 2 + 1;
         for (int k = 0; k < nbs; ++k) ps[k] = (double) std::norm(specFast[k]);
         const int nb = (int) bandEdges.size() - 1;
+        int fastActive = 0;
         const int m = nFFT / nFast;
         for (int b = 0; b < nb; ++b) {
             const int lo = bandEdges[b];
@@ -262,6 +271,7 @@ void ZeroDenoiser::analyse()
             const double snr = Pb / (fnoise[b] * over);
             const double T = 1.0 + params.fastThreshold / std::sqrt(K);
             const double gb = std::sqrt(std::clamp((snr - T) / (snr + 1e-12), 0.0, 1.0));
+            if (b >= fastVadLo && b < fastVadHi) fastActive += gb > 0.3 ? 1 : 0;
             // expand band -> long bins (each fast bin covers m long bins)
             const int kLo = lo * m;
             const int kHi = (b == nb - 1) ? nBins : hi * m;
@@ -270,12 +280,17 @@ void ZeroDenoiser::analyse()
                 gfPrev[k] = gf;
             }
         }
+        const int nv = std::max(1, fastVadHi - fastVadLo);
+        fastVad = std::clamp(((double) fastActive / nv - 0.1) / 0.3, 0.0, 1.0);
         for (int k = 0; k < bandEdges[0] * m; ++k) gfPrev[k] = aFastRel * gfPrev[k];
         for (int k = 0; k < nBins; ++k) gPrev[k] = std::max(gPrev[k], gfPrev[k]);
     }
 
     for (int k = 0; k < nBins; ++k) {
-        gain[k] = (float) (gmin + (1.0 - gmin) * gPrev[k]);
+        double gm = gmin;
+        if (k >= hfStartBin) // keep some 'air' (sibilance, breath) while speech is present
+            gm = std::exp((1.0 - vad) * std::log(gmin) + vad * std::log(std::max(gmin, kHfFloor)));
+        gain[k] = (float) (gm + (1.0 - gm) * gPrev[k]);
         gainOut[k] = gain[k];
     }
 
@@ -299,7 +314,10 @@ void ZeroDenoiser::designMinPhase(const float* g, float* hOut)
     frame[N / 2] = tmp[N / 2];
     for (int i = N / 2 + 1; i < N; ++i) frame[i] = 0.0f;
     fftMp.forwardReal(frame.data(), specMp.data());
-    for (int k = 0; k < nBins; ++k) specMp[k] = std::exp(specMp[k]);
+    for (int k = 0; k < nBins; ++k) {
+        const float m = std::exp(specMp[k].real()), ph = specMp[k].imag();
+        specMp[k] = FFT::cpx(m * std::cos(ph), m * std::sin(ph));
+    }
     fftMp.inverseReal(specMp.data(), tmp.data());
     const int tail = nTaps / 4;
     for (int i = 0; i < nTaps; ++i) hOut[i] = tmp[i];
