@@ -217,6 +217,54 @@ static void testRobustness()
     CHECK(finite, "silence -> full-scale Nyquist + denormal input stays finite (stereo, 44.1k)");
 }
 
+static void testAiMode()
+{
+    // AI mode as the plugin runs it: params.ai + 480-sample lookahead.
+    auto make = [](zd::ZeroDenoiser& d, float amount) {
+        d.prepare(48000, 1);
+        zd::DenoiserParams p; p.ai = true; p.amount = amount;
+        d.setParams(p);
+        d.setLookahead(480);
+    };
+    std::vector<float> x(48000 * 3);
+    std::mt19937 rng(11);
+    std::normal_distribution<float> nd(0.f, 0.05f);
+    for (auto& v : x) v = nd(rng);
+    // amount 0 -> exact 480-sample delay
+    {
+        zd::ZeroDenoiser d; make(d, 0.0f);
+        std::vector<float> y = x; run(d, y, 0);
+        double e = 0;
+        for (size_t i = 480; i < x.size(); ++i) e = std::max(e, (double) std::abs(y[i] - x[i - 480]));
+        CHECK(e < 1e-5, "AI amount=0 = exact 480-sample delay (max err %.2e)", e);
+    }
+    // block-size independence
+    {
+        zd::ZeroDenoiser d1, d2, d3; make(d1, 1.0f); make(d2, 1.0f); make(d3, 1.0f);
+        std::vector<float> a = x, b = x, c = x;
+        run(d1, a, 1); run(d2, b, 512); run(d3, c, 0);
+        double e = 0;
+        for (size_t i = 0; i < x.size(); ++i) e = std::max({ e, (double) std::abs(a[i] - b[i]), (double) std::abs(a[i] - c[i]) });
+        CHECK(e == 0.0, "AI output independent of host block size (max diff %.2e)", e);
+        const double red = rmsDb(a, 48000 * 2, x.size()) - rmsDb(x, 48000 * 2, x.size());
+        // RNNoise was trained on real noise + speech; on synthetic full-band white
+        // noise it only reduces ~10-15 dB (known limitation, see README). Sanity check only.
+        CHECK(red < -8.0, "AI engages on white noise (%.1f dB; DSP modes reach < -25 dB)", red);
+    }
+    // switching AI on/off at runtime stays finite
+    {
+        zd::ZeroDenoiser d; make(d, 1.0f);
+        std::vector<float> y = x;
+        bool finite = true;
+        for (size_t pos = 0; pos < y.size(); pos += 4800) {
+            zd::DenoiserParams p = d.getParams(); p.ai = ((pos / 4800) % 2) == 0; d.setParams(p);
+            float* q = y.data() + pos; d.process(&q, 1, 4800);
+        }
+        for (float v : y) finite &= std::isfinite(v) && std::abs(v) < 1.0f;
+        CHECK(finite, "AI on/off toggling every 100 ms stays finite and bounded");
+    }
+}
+
 int main()
 {
     testFFT();
@@ -228,6 +276,7 @@ int main()
     testHighSampleRates();
     testLearnAndFreeze();
     testRobustness();
+    testAiMode();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

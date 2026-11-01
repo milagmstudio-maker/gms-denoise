@@ -59,7 +59,8 @@ void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int)
 
 void ZeroDenoiseProcessor::applyMode()
 {
-    const int mode = juce::jlimit(0, 2, (int) modeParam->load());
+    const int mode = juce::jlimit(0, kNumModes - 1, (int) modeParam->load());
+    aiModeForUi.store(mode == kModeAi);
     const int la = kModeLookahead[mode] * denoiser.getScale();
     if (la != denoiser.getLookahead() || getLatencySamples() != la) {
         denoiser.setLookahead(la);
@@ -79,6 +80,7 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     p.amount = amountParam->load() * 0.01f;
     p.learn = learnParam->load() > 0.5f;
     p.adaptive = adaptParam->load() > 0.5f;
+    p.ai = aiModeForUi.load();
     denoiser.setParams(p);
     denoiser.process(buffer.getArrayOfWritePointers(), numCh, buffer.getNumSamples());
 

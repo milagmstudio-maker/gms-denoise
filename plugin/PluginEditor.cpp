@@ -72,6 +72,14 @@ void ZeroDenoiseEditor::refresh(bool immediate)
         latencyLabel.setText("LATENCY  " + juce::String(ms, 1) + " ms  (" + juce::String(lat) + " smp)",
                              juce::dontSendNotification);
     }
+    // Learn/Adaptive drive the DSP noise estimator; the AI network tracks noise itself.
+    const bool dspControls = !proc.isAiMode();
+    if (learn.isEnabled() != dspControls) {
+        learn.setEnabled(dspControls);
+        adaptive.setEnabled(dspControls);
+        learn.setAlpha(dspControls ? 1.0f : 0.4f);
+        adaptive.setAlpha(dspControls ? 1.0f : 0.4f);
+    }
     for (size_t b = 0; b < shown.size(); ++b) {
         const float v = proc.meter[b].load(std::memory_order_relaxed);
         shown[b] = (immediate || v < shown[b]) ? v : shown[b] + 0.25f * (v - shown[b]);

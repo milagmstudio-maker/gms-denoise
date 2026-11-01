@@ -8,7 +8,7 @@ int main(int argc, char** argv)
     ZeroDenoiseProcessor proc;
     proc.setPlayConfigDetails(2, 2, 48000.0, 256);
     proc.prepareToPlay(48000.0, 256);
-    if (argc > 2) proc.apvts.getParameter("mode")->setValueNotifyingHost((float) std::atoi(argv[2]) / 2.0f);
+    if (argc > 2) proc.apvts.getParameter("mode")->setValueNotifyingHost((float) std::atoi(argv[2]) / (float) (ZeroDenoiseProcessor::kNumModes - 1));
     proc.apvts.getParameter("amount")->setValueNotifyingHost(0.7f);
     juce::AudioBuffer<float> buf(2, 256);
     juce::MidiBuffer midi;

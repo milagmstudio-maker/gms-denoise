@@ -6,7 +6,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-option(ZD_BUILD_PLUGIN "Build the JUCE plugin (VST3/AU/Standalone)" ON)
+option(ZD_BUILD_PLUGIN "Build the JUCE plugin (VST3, plus AU on macOS)" ON)
 
 # ---- DSP core (framework independent) ---------------------------------
 # RNNoise (BSD-3, vendored; see third_party/rnnoise/README.md)
@@ -42,7 +42,7 @@ if(ZD_BUILD_PLUGIN)
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(JUCE)
 
-  set(ZD_FORMATS VST3 Standalone)
+  set(ZD_FORMATS VST3)
   if(APPLE)
     list(APPEND ZD_FORMATS AU)
   endif()

@@ -41,8 +41,13 @@ public:
     std::atomic<int> latencyForUi { 0 };
 
     // Mode -> lookahead in samples (signal delay reported to the host)
-    static constexpr int kModeLookahead[3] = { 0, 128, 512 };
-    static juce::StringArray modeNames() { return { "Zero latency", "Low latency", "High quality" }; }
+    // AI: RNNoise gains need one 480-sample network frame of lookahead (10 ms @48k).
+    static constexpr int kNumModes = 4;
+    static constexpr int kModeAi = 3;
+    static constexpr int kModeLookahead[kNumModes] = { 0, 128, 512, 480 };
+    static juce::StringArray modeNames() { return { "Zero latency", "Low latency", "High quality", "AI (10 ms)" }; }
+    bool isAiMode() const { return aiModeForUi.load(); }
+    std::atomic<bool> aiModeForUi { false };
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
