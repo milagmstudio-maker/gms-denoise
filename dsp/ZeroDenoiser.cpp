@@ -80,6 +80,11 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aRel = std::exp(-frameT / 0.02);
     aSlow = std::exp(-frameT / 0.03);
     aTail = std::exp(-frameT / 0.15);
+    gateAtkC = std::exp(-1.0 / (0.0005 * fs));
+    gateRelC = std::exp(-1.0 / (0.010 * fs));
+    gateOpenC = std::exp(-1.0 / (0.0007 * fs));
+    gateCloseC = std::pow(1e-6, 1.0 / (0.040 * fs));                   // reaches -120 dB in 40 ms
+    gateHoldLen = (long) (0.080 * fs);
     floorSubLen = (long) (0.5 / frameT);
     aVoiceRel = std::exp(-frameT / 0.015); // short release: noise must not leak after a word ends
     maxVoiceHoldHops = (long) (2.0 / frameT);
@@ -154,6 +159,7 @@ void ZeroDenoiser::reset()
     floorN.assign(nBins, 0.0);
     floorRing.assign(kFloorSubs, std::vector<double>(nBins, 1e300));
     floorRingPos = 0; floorHop = 0; floorFilled = 0;
+    gateEnv = 0.0; gateGain = 1.0; gateOpen = true; gateHold = gateHoldLen; gateLevelDb = -120.0f;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
@@ -179,8 +185,13 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 {
     const int nc = std::min(numChannels, nCh);
     const float invC = 1.0f / (float) std::max(1, nc);
+    const bool gateOn = params.gateDb > DenoiserParams::kGateOff;
+    const double thrOpen = std::pow(10.0, params.gateDb / 10.0);        // power
+    const double thrClose = std::pow(10.0, (params.gateDb - 3.0) / 10.0); // 3 dB hysteresis
     for (int n = 0; n < numSamples; ++n) {
         float mono = 0.0f;
+        double pw = 0.0;
+        if (!gateDetectOutput) for (int c = 0; c < nc; ++c) pw = std::max(pw, (double) ch[c][n] * ch[c][n]);
         for (int c = 0; c < nc; ++c) {
             const float x = ch[c][n];
             mono += x;
@@ -209,10 +220,24 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
             const float yOld = dot(w, curRev.data(), nTaps);
             const float yNew = dot(w, nextRev.data(), nTaps);
             ch[c][n] = yOld + f * (yNew - yOld);
+            if (gateDetectOutput) pw = std::max(pw, (double) ch[c][n] * ch[c][n]);
+        }
+        // gate detector: fast attack (~0.5 ms), ~10 ms release on the loudest channel
+        gateEnv = pw > gateEnv ? gateAtkC * gateEnv + (1.0 - gateAtkC) * pw : gateRelC * gateEnv + (1.0 - gateRelC) * pw;
+        if (gateOn) {
+            if (gateEnv >= thrOpen) { gateOpen = true; gateHold = gateHoldLen; }
+            else if (gateEnv < thrClose) { if (gateHold > 0) --gateHold; else gateOpen = false; }
+            // open in ~1 ms, close over ~40 ms down to true silence
+            gateGain = gateOpen ? gateOpenC * gateGain + (1.0 - gateOpenC)
+                                : (gateGain * gateCloseC < 1e-6 ? 0.0 : gateGain * gateCloseC);
+            for (int c = 0; c < nc; ++c) ch[c][n] *= (float) gateGain;
+        } else {
+            gateOpen = true; gateGain = 1.0; gateHold = gateHoldLen;
         }
 
         if (++hopCount == hop) {
             hopCount = 0;
+            gateLevelDb = (float) (10.0 * std::log10(gateEnv + 1e-12));
             if (aiActive) analyseAi(); else analyse();
         }
     }
@@ -262,7 +287,7 @@ void ZeroDenoiser::computeDspGain(float* out)
     const double amt = std::clamp((double) params.amount, 0.0, 1.0);
     const double over = 1.0 + 1.5 * amt;
     // Up to 55 dB of attenuation where there is no speech.
-    const double gmin = std::pow(10.0, -(amt * 55.0) / 20.0);
+    const double gmin = floorGain();
 
     for (int k = 0; k < nBins; ++k) {
         const double Praw = (double) std::norm(spec[k]);
@@ -458,8 +483,7 @@ void ZeroDenoiser::analyseAi()
         aiNew = false;
         // Network bins: 481 over a 960-pt FFT at fs/scale. Ours: nFFT = 1024*scale
         // at fs, i.e. the same Hz spacing family, so bin k maps to k * 960/1024.
-        const double amt = std::clamp((double) params.amount, 0.0, 1.0);
-        const float gmin = (float) std::pow(10.0, -(amt * 55.0) / 20.0);
+        const float gmin = (float) floorGain();
         const float* r = ai.gains();
         for (int k = 0; k < nBins; ++k) {
             const double pos = std::min((double) k * 960.0 / 1024.0, (double) (AiGains::kBins - 1));
@@ -527,10 +551,21 @@ void ZeroDenoiser::analyseAi()
             for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], vg * gDsp[k]);
         }
     }
+    {   // the Reduction setting is a hard limit (hiss assist may otherwise go below it)
+        const float gmin = (float) floorGain();
+        for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], gmin);
+    }
     for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
     for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
+}
+
+double ZeroDenoiser::floorGain() const
+{
+    const double db = params.reductionDb >= 0.0f ? std::min((double) params.reductionDb, 120.0)
+                                                 : std::clamp((double) params.amount, 0.0, 1.0) * 55.0;
+    return std::pow(10.0, -db / 20.0);
 }
 
 void ZeroDenoiser::designMinPhase(const float* g, float* hOut)

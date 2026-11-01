@@ -299,6 +299,39 @@ static void testAiMode()
     }
 }
 
+static void testReductionAndGate()
+{
+    // Reduction limit: white noise is pulled down by about the set amount, no more.
+    for (float lim : { 10.0f, 20.0f }) {
+        zd::ZeroDenoiser d; d.prepare(48000, 1);
+        zd::DenoiserParams p; p.amount = 1.0f; p.reductionDb = lim; d.setParams(p);
+        std::vector<float> x(48000 * 3);
+        std::mt19937 rng(9); std::normal_distribution<float> nd(0.f, 0.05f);
+        for (auto& v : x) v = nd(rng);
+        std::vector<float> y = x; run(d, y, 0);
+        const double red = rmsDb(y, 96000, 144000) - rmsDb(x, 96000, 144000);
+        CHECK(red > -lim - 1.5 && red < -lim + 3.0, "Reduction %.0f dB -> white noise %.1f dB", lim, red);
+    }
+    // Gate: -60 dBFS noise with a -20 dBFS tone burst, threshold -40 dBFS.
+    for (int la : { 0, 480 }) {
+        zd::ZeroDenoiser d; d.prepare(48000, 1);
+        zd::DenoiserParams p; p.amount = 0.0f; p.reductionDb = 0.0f; p.gateDb = -40.0f; d.setParams(p); d.setLookahead(la);
+        const int n = 48000 * 2, b0 = 48000, b1 = 48000 + 24000;
+        std::vector<float> x(n);
+        std::mt19937 rng(3); std::normal_distribution<float> nd(0.f, 0.001f);
+        for (int i = 0; i < n; ++i) x[i] = nd(rng) + (i >= b0 && i < b1 ? 0.1f * std::sin(2.0 * M_PI * 440.0 * i / 48000.0) : 0.0f);
+        std::vector<float> y = x; run(d, y, 0);
+        double mx = 0; for (int i = 12000; i < b0 - 4800; ++i) mx = std::max(mx, (double) std::abs(y[i]));
+        double mx2 = 0; for (int i = b1 + la + 9600; i < n; ++i) mx2 = std::max(mx2, (double) std::abs(y[i]));
+        CHECK(mx == 0.0 && mx2 == 0.0, "gate (lookahead %d): noise below threshold is exactly silent (%.1e %.1e)", la, mx, mx2);
+        const double tone = rmsDb(y, b0 + la + 480, b1 + la) - rmsDb(x, b0 + 480, b1);
+        CHECK(std::abs(tone) < 0.1, "gate (lookahead %d): burst passes (%.2f dB)", la, tone);
+        // onset: first 2 ms after the burst starts
+        const double on = rmsDb(y, b0 + la, b0 + la + 96) - rmsDb(x, b0, b0 + 96);
+        CHECK(on > (la > 0 ? -0.5 : -6.0), "gate (lookahead %d): onset first 2 ms %.2f dB", la, on);
+    }
+}
+
 int main()
 {
     testFFT();
@@ -311,6 +344,7 @@ int main()
     testLearnAndFreeze();
     testRobustness();
     testAiMode();
+    testReductionAndGate();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

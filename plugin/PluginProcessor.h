@@ -39,6 +39,8 @@ public:
     std::array<std::atomic<float>, kMeterBands> meter {};
     std::atomic<float> sampleRateForUi { 48000.0f };
     std::atomic<int> latencyForUi { 0 };
+    std::atomic<float> inputLevelForUi { -120.0f };
+    std::atomic<bool> gateOpenForUi { true };
 
     // Mode -> lookahead in samples (signal delay reported to the host)
     // AI: RNNoise gains need one 480-sample network frame of lookahead (10 ms @48k).
@@ -60,6 +62,8 @@ private:
     std::atomic<float>* learnParam = nullptr;
     std::atomic<float>* adaptParam = nullptr;
     std::atomic<float>* voiceParam = nullptr;
+    std::atomic<float>* reductionParam = nullptr;
+    std::atomic<float>* gateParam = nullptr;
     void applyMode();
     juce::SmoothedValue<float> outGain;
     std::array<int, kMeterBands + 1> meterEdges {};

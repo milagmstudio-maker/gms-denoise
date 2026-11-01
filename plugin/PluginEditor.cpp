@@ -6,7 +6,8 @@ const juce::Colour bg(0xff15181d), panel(0xff1f242b), accent(0xff4fc3a1), dim(0x
 
 ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     : AudioProcessorEditor(&p), proc(p),
-      amountAtt(p.apvts, "amount", amount), outputAtt(p.apvts, "output", output)
+      amountAtt(p.apvts, "amount", amount), outputAtt(p.apvts, "output", output),
+      reductionAtt(p.apvts, "reduction", reduction), gateAtt(p.apvts, "gate", gate)
 {
     amount.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     amount.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 22);
@@ -18,6 +19,15 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     output.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
     output.setColour(juce::Slider::rotarySliderFillColourId, dim);
     addAndMakeVisible(output);
+
+    for (auto* s : { &reduction, &gate }) {
+        s->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        s->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+        s->setColour(juce::Slider::rotarySliderFillColourId, accent);
+        addAndMakeVisible(s);
+    }
+    reduction.setTooltip("Maximum noise reduction. 0 dB = no reduction.");
+    gate.setTooltip("Input quieter than this is muted completely (after noise reduction). Fully left = off.");
 
     learn.setClickingTogglesState(true);
     learn.setTooltip("Turn on during a noise-only passage, turn off to use the learned noise");
@@ -38,20 +48,23 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     addAndMakeVisible(mode);
     modeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "mode", mode);
 
-    for (auto* l : { &amountLabel, &outputLabel, &latencyLabel, &modeLabel }) {
+    for (auto* l : { &amountLabel, &outputLabel, &latencyLabel, &modeLabel, &reductionLabel, &gateLabel, &gateStatus }) {
         l->setJustificationType(juce::Justification::centred);
         l->setColour(juce::Label::textColourId, dim);
         addAndMakeVisible(l);
     }
-    amountLabel.setText("NOISE REDUCTION", juce::dontSendNotification);
+    amountLabel.setText("AMOUNT", juce::dontSendNotification);
     outputLabel.setText("OUTPUT", juce::dontSendNotification);
     modeLabel.setText("MODE", juce::dontSendNotification);
+    reductionLabel.setText("REDUCTION", juce::dontSendNotification);
+    gateLabel.setText("GATE", juce::dontSendNotification);
+    gateStatus.setFont(juce::FontOptions(12.0f));
     latencyLabel.setJustificationType(juce::Justification::centredRight);
     latencyLabel.setFont(juce::FontOptions(16.0f, juce::Font::bold));
     latencyLabel.setColour(juce::Label::textColourId, accent);
 
     for (auto& s : shown) s = 0.0f;
-    setSize(540, 380);
+    setSize(540, 500);
     refresh(true);
     startTimerHz(30);
 }
@@ -79,6 +92,15 @@ void ZeroDenoiseEditor::refresh(bool immediate)
     }
     const bool ai = proc.isAiMode(); // the switch only acts in AI mode
     if (voiceProtect.isEnabled() != ai) { voiceProtect.setEnabled(ai); voiceProtect.setAlpha(ai ? 1.0f : 0.4f); }
+    {
+        const float lvl = proc.inputLevelForUi.load(std::memory_order_relaxed);
+        const bool on = proc.apvts.getRawParameterValue("gate")->load() > zd::DenoiserParams::kGateOff;
+        const bool open = proc.gateOpenForUi.load(std::memory_order_relaxed);
+        const juce::String t = "in " + (lvl < -99.0f ? juce::String("-inf") : juce::String(juce::roundToInt(lvl))) + " dB"
+                               + (on ? (open ? "  |  open" : "  |  MUTED") : "");
+        if (gateStatus.getText() != t) gateStatus.setText(t, juce::dontSendNotification);
+        gateStatus.setColour(juce::Label::textColourId, on && !open ? juce::Colour(0xffd9534f) : dim);
+    }
     for (size_t b = 0; b < shown.size(); ++b) {
         const float v = proc.meter[b].load(std::memory_order_relaxed);
         shown[b] = (immediate || v < shown[b]) ? v : shown[b] + 0.25f * (v - shown[b]);
@@ -116,6 +138,19 @@ void ZeroDenoiseEditor::resized()
     latencyLabel.setBounds(top.removeFromRight(280));
     meterArea = area.removeFromTop(110);
     area.removeFromTop(10);
+    auto bottom = area.removeFromBottom(130);
+    {
+        const int w = bottom.getWidth() / 3;
+        auto rb = bottom.removeFromLeft(w), gb = bottom.removeFromLeft(w), ob = bottom;
+        reductionLabel.setBounds(rb.removeFromTop(18));
+        reduction.setBounds(rb.reduced(14, 0));
+        gateLabel.setBounds(gb.removeFromTop(18));
+        gateStatus.setBounds(gb.removeFromBottom(16));
+        gate.setBounds(gb.reduced(14, 0));
+        outputLabel.setBounds(ob.removeFromTop(18));
+        output.setBounds(ob.reduced(14, 0));
+    }
+    area.removeFromBottom(6);
     auto left = area.removeFromLeft(area.getWidth() * 2 / 3);
     amountLabel.setBounds(left.removeFromTop(18));
     amount.setBounds(left.reduced(10, 0));
@@ -127,7 +162,4 @@ void ZeroDenoiseEditor::resized()
     modeLabel.setBounds(right.removeFromTop(18));
     mode.setBounds(right.removeFromTop(26).reduced(6, 0));
     voiceProtect.setBounds(right.removeFromTop(24).reduced(4, 0));
-    right.removeFromTop(4);
-    outputLabel.setBounds(right.removeFromTop(18));
-    output.setBounds(right.reduced(10, 0));
 }

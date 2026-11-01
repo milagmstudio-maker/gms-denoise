@@ -30,6 +30,8 @@ MODES["x_notail"] = ({"ZD_AI": "1", "ZD_RLO": "2", "ZD_RHI": "6", "ZD_TAIL": "0"
 MODES["x_nohold"] = ({"ZD_AI": "1", "ZD_RLO": "2", "ZD_RHI": "6", "ZD_NOHOLD": "1"}, 480)
 MODES["x_none"] = ({"ZD_AI": "1", "ZD_RLO": "2", "ZD_RHI": "6", "ZD_NOONSET": "1", "ZD_TAIL": "0", "ZD_NOHOLD": "1"}, 480)
 MODES["ai_strong"] = ({"ZD_AI": "1", "ZD_STRONG": "1"}, 480)
+MODES["ai_red60"] = ({"ZD_AI": "1", "ZD_RED": "60"}, 480)
+MODES["ai_red80"] = ({"ZD_AI": "1", "ZD_RED": "80"}, 480)
 MODES["ai_pure"] = ({"ZD_AI": "1", "ZD_AI_PURE": "1"}, 480)  # network gains only
 AMOUNT = os.environ.get("AMOUNT", "0.7")
 

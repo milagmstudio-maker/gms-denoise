@@ -167,3 +167,25 @@ the gate is now a user switch (parameter `voiceprotect`, "Strong voice protect",
 Off (default): gate 4..12 x floor, ~93 of 8448 loud scream frames cut >6 dB, cafe pauses -21 dB.
 On: gate 3..8, ~61 frames cut, cafe pauses -14 dB. Use On for screaming / shouting content in
 quiet-ish noise; Off when other people talk in the background.
+
+## Reduction and Gate (v0.10)
+
+User asked for a settable reduction depth and a "below X dB = silence" threshold.
+
+`Reduction` (0..80 dB, default 40): hard limit on attenuation (`DenoiserParams::reductionDb`;
+< 0 keeps the old amount x 55 dB mapping for the library/tests). Amount now only sets how
+eagerly noise is removed (over-subtraction). Measured (AI, 6 noises x 5/10 dB SNR,
+`cppeval.py ai ai_red60 ai_red80`): pause -19.6 dB at 40, -19.8 at 60/80 - the floor is not
+what limits pauses; the residual comes from the network's own gains, the hiss-assist cap and
+the voice guard. So Reduction is mainly useful to remove *less*.
+
+`Gate Threshold` (-90 = Off .. -10 dBFS): after the denoiser; detector = loudest input channel,
+0.5 ms attack / 10 ms release on x^2 (peak-ish), 3 dB hysteresis, 80 ms hold, opens in ~1 ms,
+closes to exact zero in 40 ms. Detector runs on the undelayed input, so in lookahead modes the
+gate opens before the onset (AI: onset 0.0 dB; zero latency: first 2 ms -3 dB).
+`prototype/gateeval.py` (threshold = peak of the meter in a noise-only pause + 2 dB, AI mode):
+pauses fully muted 76-83 %, but speech frames cut > 6 dB: 37.5 % at 10 dB SNR, 16 % at 20 dB
+(quiet speech 60 % / 28 %); typing 76 %, cafe 32 %, hiss 5 %. Detecting on the denoised output
+instead (`gateDetectOutput`, ZD_GATEOUT) helps steady noise (AirCon 15 -> 7 %) but not hiss or
+typing; the input detector was kept because its level matches the meter the user sets it by.
+A level gate only works when the voice is well above the noise.

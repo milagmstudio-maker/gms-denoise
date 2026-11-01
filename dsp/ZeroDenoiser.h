@@ -29,6 +29,9 @@ struct DenoiserParams {
     bool aiHissAssist = true; // AI mode: DSP estimator adds attenuation for stationary noise (hiss)
     bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
     bool aiStrongVoice = false; // AI mode: protect quieter voices too (screams fully kept, more background chatter survives)
+    float reductionDb = -1.0f;  // maximum attenuation in dB; < 0: follow amount (amount x 55 dB)
+    float gateDb = -200.0f;     // gate threshold on the input level (dBFS); <= kGateOff: gate off
+    static constexpr float kGateOff = -90.0f;
 };
 
 class ZeroDenoiser {
@@ -58,6 +61,11 @@ public:
     int getFFTSize() const { return nFFT; }
     int getNumBins() const { return nBins; }
 
+    // Gate (after the denoiser): input level (dBFS, ~10 ms RMS) and state, for the UI.
+    float getInputLevelDb() const { return gateLevelDb; }
+    bool isGateOpen() const { return gateOpen; }
+    bool gateDetectOutput = false; // detector on the denoised output instead of the input
+
     // Latest per-bin gain (for metering/UI). Size getNumBins().
     const std::vector<float>& currentGain() const { return gainOut; }
 
@@ -69,8 +77,14 @@ private:
     void updateFloor();              // minimum-statistics noise floor (voice guard reference)
     double computeVoicing();         // 0..1 periodicity of the above-noise signal (300 Hz-5 kHz, f0 100-1600 Hz)
 
+    double floorGain() const; // linear minimum gain from reductionDb / amount
+
     DenoiserParams params;
     double fs = 48000.0;
+    // gate: detector on the undelayed input (so lookahead modes open the gate early)
+    double gateEnv = 0.0, gateAtkC = 0.0, gateRelC = 0.0, gateGain = 1.0, gateOpenC = 0.0, gateCloseC = 0.0;
+    long gateHold = 0, gateHoldLen = 0;
+    bool gateOpen = true; float gateLevelDb = -120.0f;
     int nCh = 0;
     int scale = 1, nFFT = kBaseFFT, nBins = kBaseFFT / 2 + 1, hop = kBaseHop, nFast = kBaseFast,
         nTaps = kBaseTaps, maxLookahead = kBaseMaxLookahead;

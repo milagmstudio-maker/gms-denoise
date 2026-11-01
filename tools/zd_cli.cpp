@@ -21,6 +21,9 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_AI_PURE")) { p.aiHissAssist = false; p.aiVoiceGuard = false; }
     if (std::getenv("ZD_NOGUARD")) p.aiVoiceGuard = false;
     if (std::getenv("ZD_STRONG")) p.aiStrongVoice = true;
+    if (std::getenv("ZD_RED")) p.reductionDb = (float) std::atof(std::getenv("ZD_RED"));
+    if (std::getenv("ZD_GATE")) p.gateDb = (float) std::atof(std::getenv("ZD_GATE"));
+    if (std::getenv("ZD_GATEOUT")) d.gateDetectOutput = true;
     if (std::getenv("ZD_ACLO")) d.setVoicingBand(std::atof(std::getenv("ZD_ACLO")));
     if (std::getenv("ZD_TAIL")) d.dbgTail = std::atof(std::getenv("ZD_TAIL"));
     if (std::getenv("ZD_NOCOMB")) d.dbgComb = false;
@@ -51,7 +54,8 @@ int main(int argc, char** argv)
                 for (int c = 0; c < nch; ++c) ptr[c] = a.ch[c].data() + pos + i;
                 d.process(ptr.data(), nch, 1);
                 if ((pos + i + 1) % 64 == 0) {
-                    if (std::getenv("ZD_VDUMP")) { float v[3] = { (float) d.getRawVoicing(), (float) d.getResid(), (float) d.getVoicing() }; std::fwrite(v, 4, 3, dump); }
+                    if (std::getenv("ZD_GDUMP")) { float v = d.getInputLevelDb(); std::fwrite(&v, 4, 1, dump); }
+                    else if (std::getenv("ZD_VDUMP")) { float v[3] = { (float) d.getRawVoicing(), (float) d.getResid(), (float) d.getVoicing() }; std::fwrite(v, 4, 3, dump); }
                     else std::fwrite(d.currentGain().data(), 4, d.currentGain().size(), dump);
                 }
             }

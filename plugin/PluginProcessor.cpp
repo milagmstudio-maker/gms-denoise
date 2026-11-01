@@ -14,6 +14,8 @@ ZeroDenoiseProcessor::ZeroDenoiseProcessor()
     learnParam = apvts.getRawParameterValue("learn");
     adaptParam = apvts.getRawParameterValue("adaptive");
     voiceParam = apvts.getRawParameterValue("voiceprotect");
+    reductionParam = apvts.getRawParameterValue("reduction");
+    gateParam = apvts.getRawParameterValue("gate");
     for (auto& m : meter) m.store(0.0f);
 }
 
@@ -32,6 +34,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout ZeroDenoiseProcessor::create
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "learn", 1 }, "Learn", false));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "adaptive", 1 }, "Adaptive", true));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "voiceprotect", 1 }, "Strong Voice Protect", false));
+    // Reduction: how far noise is pulled down at most (dB). Amount sets how eagerly it is removed.
+    p.push_back(std::make_unique<AudioParameterFloat>(
+        ParameterID { "reduction", 1 }, "Reduction", NormalisableRange<float>(0.0f, 80.0f, 0.5f), 40.0f,
+        AudioParameterFloatAttributes().withLabel("dB")));
+    // Gate: input below this level (dBFS) is muted completely. Bottom of the range = off.
+    p.push_back(std::make_unique<AudioParameterFloat>(
+        ParameterID { "gate", 1 }, "Gate Threshold", NormalisableRange<float>(zd::DenoiserParams::kGateOff, -10.0f, 0.5f),
+        zd::DenoiserParams::kGateOff,
+        AudioParameterFloatAttributes().withLabel("dB").withStringFromValueFunction([](float v, int) {
+            return v <= zd::DenoiserParams::kGateOff ? String("Off") : String(v, 1) + " dB";
+        })));
     return { p.begin(), p.end() };
 }
 
@@ -83,6 +96,8 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     p.learn = learnParam->load() > 0.5f;
     p.adaptive = adaptParam->load() > 0.5f;
     p.aiStrongVoice = voiceParam->load() > 0.5f;
+    p.reductionDb = reductionParam->load();
+    p.gateDb = gateParam->load();
     p.ai = aiModeForUi.load();
     denoiser.setParams(p);
     denoiser.process(buffer.getArrayOfWritePointers(), numCh, buffer.getNumSamples());
@@ -97,6 +112,8 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
         buffer.applyGain(outGain.getTargetValue());
     }
     updateMeter();
+    inputLevelForUi.store(denoiser.getInputLevelDb(), std::memory_order_relaxed);
+    gateOpenForUi.store(denoiser.isGateOpen(), std::memory_order_relaxed);
 }
 
 void ZeroDenoiseProcessor::updateMeter()

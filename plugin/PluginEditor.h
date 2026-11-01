@@ -13,15 +13,15 @@ private:
     void refresh(bool immediate);
 
     ZeroDenoiseProcessor& proc;
-    juce::Slider amount, output;
-    juce::Label amountLabel, outputLabel, latencyLabel, modeLabel;
+    juce::Slider amount, output, reduction, gate;
+    juce::Label amountLabel, outputLabel, latencyLabel, modeLabel, reductionLabel, gateLabel, gateStatus;
     juce::ComboBox mode;
     juce::TextButton learn { "LEARN" };
     juce::ToggleButton adaptive { "Adaptive" };
     juce::ToggleButton voiceProtect { "Strong voice protect" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt, voiceAtt;
     int blink = 0;
-    juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt;
+    juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt, reductionAtt, gateAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
     int shownLatency = -1; float shownRate = 0.0f;
     std::array<float, ZeroDenoiseProcessor::kMeterBands> shown {};
