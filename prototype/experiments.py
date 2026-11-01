@@ -46,3 +46,6 @@ cfg("cq25", **dict(BV, cq=0.25))
 cfg("cq12_4k", **dict(BV, cq=0.12, cq_start=4000))
 cfg("hf12", **dict(BV, hf_floor_db=12))
 cfg("hf18", **dict(BV, hf_floor_db=18))
+
+cfg("v3_final", **dict(BV, hf_floor_db=12))
+cfg("v3_final_hq", la=512, **dict(BV, hf_floor_db=12))
