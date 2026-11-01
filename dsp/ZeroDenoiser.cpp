@@ -159,6 +159,7 @@ void ZeroDenoiser::reset()
     floorN.assign(nBins, 0.0);
     floorRing.assign(kFloorSubs, std::vector<double>(nBins, 1e300));
     floorRingPos = 0; floorHop = 0; floorFilled = 0;
+    pcEnv = 1.0; pcHoldCnt = 0;
     gateEnv = 0.0; gateGain = 1.0; gateOpen = true; gateHold = gateHoldLen; gateLevelDb = -120.0f;
 }
 
@@ -473,7 +474,9 @@ void ZeroDenoiser::analyseAi()
         const double gate = std::clamp((lastResid - rl) / (rh - rl), 0.0, 1.0);
         const double vp = std::clamp((std::min(r, 1.0) - voiceLo) / (voiceHi - voiceLo), 0.0, 1.0) * gate;
         // loud onsets (also unvoiced) well above the noise: protect from the first hop
-        const double vo = dbgOnset ? fastVad * gate : 0.0;
+        double vo = dbgOnset ? fastVad * gate : 0.0;
+        // onsets count only when the network also hears speech (keyboard clicks, knocks do not)
+        if (onsetNeedsVad) vo *= std::clamp(aiVad / 0.5, 0.0, 1.0);
         if (vp > 0.0 && lastLag > 0) combLag = lastLag;
         voicedP = vp > voicedP ? vp : aVoiceRel * voicedP + (1.0 - aVoiceRel) * vp;
         onsetEnv = vo > onsetEnv ? vo : aVoiceRel * onsetEnv + (1.0 - aVoiceRel) * vo;
@@ -517,7 +520,8 @@ void ZeroDenoiser::analyseAi()
         // Voice tail: after a guarded voice the network may not gate the decay or
         // breath to silence at once; the floor falls from -12 dB over ~150 ms.
         tailEnv = std::max(std::min(1.0, voiced * dbgSat), aTail * tailEnv);
-        const float t = (float) (dbgTail * tailEnv);
+        // with pause cleanup the tail floor is lower (-20 dB): measured +2 dB in pauses, no loss on screams
+        const float t = (float) ((params.pauseCleanup ? std::min(dbgTail, 0.1) : dbgTail) * tailEnv);
         if (t > 1e-4f) for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], std::min(t, gDspRawSafe(k)));
     }
     if (guard && voiced > 0.0) {
@@ -550,6 +554,32 @@ void ZeroDenoiser::analyseAi()
         } else {
             for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], vg * gDsp[k]);
         }
+    }
+    if (params.pauseCleanup) {
+        // Pause cleanup: when no detector hears a voice for pcHold, every bin falls to the
+        // Reduction floor over ~pcRel; any voice evidence restores the normal gains at once.
+        // In AI mode the analysis runs 10 ms ahead of the audio, so the gains are back
+        // before the voice reaches the output.
+        double pres = 0.0;
+        if (pcSrc & 1) pres = std::max(pres, aiVad);
+        if (pcSrc & 2) pres = std::max(pres, voiced);
+        if (pcSrc & 4) pres = std::max(pres, std::max(vad, fastVad));
+        if (pcSrc & 8) pres = std::max(pres, voicedP); // pitched voice only (not the onset part)
+        const long holdHops = (long) (pcHold * fs / hop);
+        if (pres > pcThr) pcHoldCnt = holdHops; else if (pcHoldCnt > 0) --pcHoldCnt;
+        const double aRelPc = std::exp(-(hop / fs) / std::max(pcRel, 1e-3));
+        pcEnv = pcHoldCnt > 0 ? 1.0 : aRelPc * pcEnv;
+        if (pcEnv < 0.999) {
+            const float gmin = (float) floorGain();
+            // interpolate in dB between the normal gain and the floor
+            const float w = (float) pcEnv;
+            for (int k = 0; k < nBins; ++k) {
+                const float g = std::max(gain[k], gmin);
+                gain[k] = std::exp(w * std::log(g) + (1.0f - w) * std::log(gmin));
+            }
+        }
+    } else {
+        pcEnv = 1.0; pcHoldCnt = 0;
     }
     {   // the Reduction setting is a hard limit (hiss assist may otherwise go below it)
         const float gmin = (float) floorGain();

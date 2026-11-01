@@ -29,6 +29,7 @@ struct DenoiserParams {
     bool aiHissAssist = true; // AI mode: DSP estimator adds attenuation for stationary noise (hiss)
     bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
     bool aiStrongVoice = false; // AI mode: protect quieter voices too (screams fully kept, more background chatter survives)
+    bool pauseCleanup = false;  // AI mode: where no voice is detected, pull everything down to the Reduction floor (v0.11)
     float reductionDb = -1.0f;  // maximum attenuation in dB; < 0: follow amount (amount x 55 dB)
     float gateDb = -200.0f;     // gate threshold on the input level (dBFS); <= kGateOff: gate off
     static constexpr float kGateOff = -90.0f;
@@ -64,7 +65,11 @@ public:
     // Gate (after the denoiser): input level (dBFS, ~10 ms RMS) and state, for the UI.
     float getInputLevelDb() const { return gateLevelDb; }
     bool isGateOpen() const { return gateOpen; }
-    bool gateDetectOutput = false; // detector on the denoised output instead of the input
+    bool gateDetectOutput = false;
+    // pause cleanup tuning (zd_cli env): presence threshold, hold, release (s), which detectors
+    double pcThr = 0.3, pcHold = 0.15, pcRel = 0.06; int pcSrc = 3; // bits: 1 network VAD, 2 voice guard (pitched + onsets), 4 DSP vad, 8 pitched only
+    bool onsetNeedsVad = false;
+    double getPausePresence() const { return pcEnv; } // detector on the denoised output instead of the input
 
     // Latest per-bin gain (for metering/UI). Size getNumBins().
     const std::vector<float>& currentGain() const { return gainOut; }
@@ -141,6 +146,7 @@ public:
     bool dbgFloor = true, dbgComb = true; double floorBias = 2.0, dbgTail = 0.25;
 private:
     double holdBudget = 0.0;
+    double pcEnv = 1.0; long pcHoldCnt = 0;
     // Voice guard tuning (prototype/expreval.py + cppeval.py, 2026-11-01):
     // periodicity 0.6..0.95, above-noise power 3..8 x (2 x 2 x min-statistics floor),
     // full protection from half confidence. Lower = screams fully kept but more

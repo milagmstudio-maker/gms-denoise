@@ -332,6 +332,30 @@ static void testReductionAndGate()
     }
 }
 
+static void testPauseCleanup()
+{
+    // AI mode: noise, then a harmonic voice-like tone, then noise. With pause cleanup the
+    // noise-only parts must go deeper while the tone is kept.
+    auto runOnce = [](bool pc, double& pause, double& tone) {
+        zd::ZeroDenoiser d; d.prepare(48000, 1);
+        zd::DenoiserParams p; p.ai = true; p.amount = 0.7f; p.reductionDb = 60.0f; p.pauseCleanup = pc;
+        d.setParams(p); d.setLookahead(480);
+        const int n = 48000 * 6, t0 = 48000 * 3, t1 = 48000 * 4;
+        std::vector<float> x(n), s(n, 0.0f);
+        std::mt19937 rng(5); std::normal_distribution<float> nd(0.f, 0.01f);
+        for (int i = t0; i < t1; ++i)
+            for (int h = 1; h <= 8; ++h) s[i] += 0.05f / h * (float) std::sin(2.0 * M_PI * 220.0 * h * i / 48000.0);
+        for (int i = 0; i < n; ++i) x[i] = nd(rng) + s[i];
+        std::vector<float> y = x; run(d, y, 0);
+        pause = rmsDb(y, 48000 * 5 + 480, n) - rmsDb(x, 48000 * 5, n - 480);
+        tone = rmsDb(y, t0 + 480 + 4800, t1 + 480) - rmsDb(x, t0 + 4800, t1);
+    };
+    double p0, t0, p1, t1;
+    runOnce(false, p0, t0); runOnce(true, p1, t1);
+    CHECK(p1 < p0 - 3.0, "pause cleanup: noise-only part %.1f dB (off: %.1f dB)", p1, p0);
+    CHECK(t1 > -1.0, "pause cleanup: harmonic voice kept (%.2f dB, off %.2f dB)", t1, t0);
+}
+
 int main()
 {
     testFFT();
@@ -345,6 +369,7 @@ int main()
     testRobustness();
     testAiMode();
     testReductionAndGate();
+    testPauseCleanup();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

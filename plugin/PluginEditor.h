@@ -19,7 +19,8 @@ private:
     juce::TextButton learn { "LEARN" };
     juce::ToggleButton adaptive { "Adaptive" };
     juce::ToggleButton voiceProtect { "Strong voice protect" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt, voiceAtt;
+    juce::ToggleButton pauseClean { "Pause cleanup" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt, voiceAtt, pauseAtt;
     int blink = 0;
     juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt, reductionAtt, gateAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;

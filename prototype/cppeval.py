@@ -32,6 +32,20 @@ MODES["x_none"] = ({"ZD_AI": "1", "ZD_RLO": "2", "ZD_RHI": "6", "ZD_NOONSET": "1
 MODES["ai_strong"] = ({"ZD_AI": "1", "ZD_STRONG": "1"}, 480)
 MODES["ai_red60"] = ({"ZD_AI": "1", "ZD_RED": "60"}, 480)
 MODES["ai_red80"] = ({"ZD_AI": "1", "ZD_RED": "80"}, 480)
+for _n, _x in {"pc": {}, "pc_ai": {"ZD_PCSRC": "1"}, "pc_ai2": {"ZD_PCSRC": "3"}, "pc_t5": {"ZD_PCTHR": "0.5"},
+               "pc_h3": {"ZD_PCHOLD": "0.3"}, "pc_r15": {"ZD_PCREL": "0.15"}}.items():
+    MODES["ai_" + _n] = (dict({"ZD_AI": "1", "ZD_PC": "1", "ZD_RED": "40"}, **_x), 480)
+MODES["ai_v07"] = ({"ZD_AI": "1", "ZD_NOGUARD": "1"}, 480)
+MODES["ai_noon"] = ({"ZD_AI": "1", "ZD_NOONSET": "1"}, 480)
+MODES["ai_pc9"] = ({"ZD_AI": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "9"}, 480)
+MODES["ai_noon_pc9"] = ({"ZD_AI": "1", "ZD_NOONSET": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "9"}, 480)
+MODES["ai_ov"] = ({"ZD_AI": "1", "ZD_OV": "1"}, 480)
+MODES["ai_ov_pc9"] = ({"ZD_AI": "1", "ZD_OV": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "9"}, 480)
+MODES["ai_pc3"] = ({"ZD_AI": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "3"}, 480)
+MODES["ai_pc3_t1"] = ({"ZD_AI": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "3", "ZD_TAIL": "0.1"}, 480)
+MODES["ai_pc3_t0"] = ({"ZD_AI": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "3", "ZD_TAIL": "0"}, 480)
+MODES["ai_noon_pc3"] = ({"ZD_AI": "1", "ZD_NOONSET": "1", "ZD_PC": "1", "ZD_RED": "40", "ZD_PCSRC": "3"}, 480)
+MODES["ai_pc60"] = ({"ZD_AI": "1", "ZD_PC": "1", "ZD_RED": "60"}, 480)
 MODES["ai_pure"] = ({"ZD_AI": "1", "ZD_AI_PURE": "1"}, 480)  # network gains only
 AMOUNT = os.environ.get("AMOUNT", "0.7")
 

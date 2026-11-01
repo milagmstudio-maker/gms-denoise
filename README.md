@@ -189,3 +189,24 @@ pauses fully muted 76-83 %, but speech frames cut > 6 dB: 37.5 % at 10 dB SNR, 1
 instead (`gateDetectOutput`, ZD_GATEOUT) helps steady noise (AirCon 15 -> 7 %) but not hiss or
 typing; the input detector was kept because its level matches the meter the user sets it by.
 A level gate only works when the voice is well above the noise.
+
+## Pause cleanup (v0.11)
+
+User asked to remove noise more deeply where nobody speaks (instead of a level gate).
+`DenoiserParams::pauseCleanup` / plugin "Pause Cleanup" (AI mode, default off): presence =
+max(network VAD, voice guard incl. onsets); after 150 ms without presence every bin falls to the
+Reduction floor (60 ms, interpolated in dB), any presence restores at once (10 ms ahead of the
+audio thanks to the AI lookahead). Tail floor drops to -20 dB while it is on.
+
+Diagnosis first (`prototype/pausediag.py`, residual noise by region, 6 noises): with v0.10 the
+residual was not limited by the floor. Typing passes almost untouched (0 dB) and office noise
+right after speech too (-4.8 dB) because the voice guard's onset part treats clicks as voice
+onsets; removing the onset part fixes that but costs scream onsets 3 dB and laughs 8.7 % dropped
+frames, so it stays. Presence from the network VAD alone gives the deepest pauses (-23 dB) but
+RNNoise does not call screams speech: scream onsets -19 dB. Pitched-only presence: scream onsets
+-10 dB. Network VAD + full guard (shipped) keeps screams at -0.03 dB.
+
+Result (cppeval, 6 noises x 5/10 dB): pause -19.6 -> -23.7 dB, OVRL 2.80 -> 2.84, onsets
+-11.8 -> -14.1 dB (quiet onsets after silence lose ~2 dB: reason for default off). Expressive set:
+scream unchanged, anger onset -1.8 -> -3.5 dB. Office gap -18.6 -> -19.1 (clicks keep it open),
+cafe -20 -> -25, hiss -34 -> -40, aircon/traffic -35 -> -40, typing unchanged (0 dB).

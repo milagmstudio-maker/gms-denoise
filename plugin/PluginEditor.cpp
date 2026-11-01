@@ -42,6 +42,11 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     voiceProtect.setColour(juce::ToggleButton::tickColourId, accent);
     voiceProtect.setTooltip("AI mode: also keep quieter screams and shouts. Background chatter is removed less.");
     addAndMakeVisible(voiceProtect);
+    pauseClean.setColour(juce::ToggleButton::textColourId, dim);
+    pauseClean.setColour(juce::ToggleButton::tickColourId, accent);
+    pauseClean.setTooltip("AI mode: where no voice is detected, pull the noise down to the Reduction setting. Very quiet word starts may lose a little.");
+    addAndMakeVisible(pauseClean);
+    pauseAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "pauseclean", pauseClean);
     voiceAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "voiceprotect", voiceProtect);
 
     mode.addItemList(ZeroDenoiseProcessor::modeNames(), 1);
@@ -91,7 +96,8 @@ void ZeroDenoiseEditor::refresh(bool immediate)
                              juce::dontSendNotification);
     }
     const bool ai = proc.isAiMode(); // the switch only acts in AI mode
-    if (voiceProtect.isEnabled() != ai) { voiceProtect.setEnabled(ai); voiceProtect.setAlpha(ai ? 1.0f : 0.4f); }
+    for (auto* b : { &voiceProtect, &pauseClean })
+        if (b->isEnabled() != ai) { b->setEnabled(ai); b->setAlpha(ai ? 1.0f : 0.4f); }
     {
         const float lvl = proc.inputLevelForUi.load(std::memory_order_relaxed);
         const bool on = proc.apvts.getRawParameterValue("gate")->load() > zd::DenoiserParams::kGateOff;
@@ -162,4 +168,5 @@ void ZeroDenoiseEditor::resized()
     modeLabel.setBounds(right.removeFromTop(18));
     mode.setBounds(right.removeFromTop(26).reduced(6, 0));
     voiceProtect.setBounds(right.removeFromTop(24).reduced(4, 0));
+    pauseClean.setBounds(right.removeFromTop(24).reduced(4, 0));
 }

@@ -24,6 +24,12 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_RED")) p.reductionDb = (float) std::atof(std::getenv("ZD_RED"));
     if (std::getenv("ZD_GATE")) p.gateDb = (float) std::atof(std::getenv("ZD_GATE"));
     if (std::getenv("ZD_GATEOUT")) d.gateDetectOutput = true;
+    if (std::getenv("ZD_PC")) p.pauseCleanup = true;
+    if (std::getenv("ZD_OV")) d.onsetNeedsVad = true;
+    if (std::getenv("ZD_PCTHR")) d.pcThr = std::atof(std::getenv("ZD_PCTHR"));
+    if (std::getenv("ZD_PCHOLD")) d.pcHold = std::atof(std::getenv("ZD_PCHOLD"));
+    if (std::getenv("ZD_PCREL")) d.pcRel = std::atof(std::getenv("ZD_PCREL"));
+    if (std::getenv("ZD_PCSRC")) d.pcSrc = std::atoi(std::getenv("ZD_PCSRC"));
     if (std::getenv("ZD_ACLO")) d.setVoicingBand(std::atof(std::getenv("ZD_ACLO")));
     if (std::getenv("ZD_TAIL")) d.dbgTail = std::atof(std::getenv("ZD_TAIL"));
     if (std::getenv("ZD_NOCOMB")) d.dbgComb = false;
