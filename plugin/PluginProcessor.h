@@ -52,6 +52,8 @@ private:
     std::atomic<float>* amountParam = nullptr;
     std::atomic<float>* outputParam = nullptr;
     std::atomic<float>* modeParam = nullptr;
+    std::atomic<float>* learnParam = nullptr;
+    std::atomic<float>* adaptParam = nullptr;
     void applyMode();
     juce::SmoothedValue<float> outGain;
     std::array<int, kMeterBands + 1> meterEdges {};

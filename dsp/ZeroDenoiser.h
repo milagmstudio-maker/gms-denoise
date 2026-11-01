@@ -22,24 +22,26 @@ struct DenoiserParams {
     float amount = 0.7f;        // 0..1 single knob
     float fastThreshold = 4.0f; // onset detector threshold (variance-normalised)
     bool onsetPath = true;
+    bool learn = false;    // while true: treat input as noise and learn its spectrum
+    bool adaptive = true;  // false: freeze the noise profile (after learning)
 };
 
 class ZeroDenoiser {
 public:
-    static constexpr int kFFT = 1024;   // long analysis size
-    static constexpr int kBins = kFFT / 2 + 1;
-    static constexpr int kHop = 64;     // filter update interval
-    static constexpr int kFast = 256;   // onset-path FFT size
-    static constexpr int kTaps = 512;   // FIR length
+    // Sizes at 44.1/48 kHz; multiplied by getScale() (1, 2 or 4) at higher rates.
+    static constexpr int kBaseFFT = 1024;  // long analysis size
+    static constexpr int kBaseHop = 64;    // filter update interval
+    static constexpr int kBaseFast = 256;  // onset-path FFT size
+    static constexpr int kBaseTaps = 512;  // FIR length
+    static constexpr int kBaseMaxLookahead = 1024;
 
     void prepare(double sampleRate, int numChannels);
     void reset();
-    void setParams(const DenoiserParams& p) { params = p; }
+    void setParams(const DenoiserParams& p);
 
     // Lookahead (samples): the audio is delayed by this much while the analysis
     // runs on the undelayed input, so gains are decided with that much "future".
     // 0 = true zero latency. Reported plugin latency must equal this value.
-    static constexpr int kMaxLookahead = 1024;
     void setLookahead(int samples);
     int getLookahead() const { return lookahead; }
     const DenoiserParams& getParams() const { return params; }
@@ -47,7 +49,11 @@ public:
     // In-place processing of non-interleaved channels. Any block size.
     void process(float* const* channels, int numChannels, int numSamples);
 
-    // Latest per-bin gain (for metering/UI). Size kBins.
+    int getScale() const { return scale; }
+    int getFFTSize() const { return nFFT; }
+    int getNumBins() const { return nBins; }
+
+    // Latest per-bin gain (for metering/UI). Size getNumBins().
     const std::vector<float>& currentGain() const { return gainOut; }
 
 private:
@@ -57,6 +63,8 @@ private:
     DenoiserParams params;
     double fs = 48000.0;
     int nCh = 0;
+    int scale = 1, nFFT = kBaseFFT, nBins = kBaseFFT / 2 + 1, hop = kBaseHop, nFast = kBaseFast,
+        nTaps = kBaseTaps, maxLookahead = kBaseMaxLookahead;
 
     // analysis input (mono sum), circular with doubled storage
     std::vector<float> anaBuf; int anaPos = 0;
@@ -80,7 +88,8 @@ private:
     std::vector<double> fnoise, graw, ps, psm;
     long frames = 0;
     int warmFrames = 0;
-    double aNoise = 0, aP = 0, aDD = 0, aFastRel = 0, aPs = 0;
+    double aNoise = 0, aP = 0, aDD = 0, aFastRel = 0, aPs = 0, aLearn = 0;
+    long learnFrames = 0;
 };
 
 } // namespace zd

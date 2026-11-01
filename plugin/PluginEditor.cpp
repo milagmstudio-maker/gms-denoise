@@ -19,6 +19,16 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     output.setColour(juce::Slider::rotarySliderFillColourId, dim);
     addAndMakeVisible(output);
 
+    learn.setClickingTogglesState(true);
+    learn.setTooltip("Turn on during a noise-only passage, turn off to use the learned noise");
+    learn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffd9534f));
+    addAndMakeVisible(learn);
+    learnAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "learn", learn);
+    adaptive.setColour(juce::ToggleButton::textColourId, dim);
+    adaptive.setColour(juce::ToggleButton::tickColourId, accent);
+    addAndMakeVisible(adaptive);
+    adaptAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "adaptive", adaptive);
+
     mode.addItemList(ZeroDenoiseProcessor::modeNames(), 1);
     addAndMakeVisible(mode);
     modeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "mode", mode);
@@ -36,12 +46,21 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     latencyLabel.setColour(juce::Label::textColourId, accent);
 
     for (auto& s : shown) s = 0.0f;
-    setSize(520, 340);
+    setSize(540, 380);
     refresh(true);
     startTimerHz(30);
 }
 
-void ZeroDenoiseEditor::timerCallback() { refresh(false); }
+void ZeroDenoiseEditor::timerCallback()
+{
+    refresh(false);
+    if (learn.getToggleState()) {
+        blink = (blink + 1) % 30;
+        learn.setButtonText(blink < 15 ? "LEARNING..." : "LEARN");
+    } else if (learn.getButtonText() != "LEARN") {
+        learn.setButtonText("LEARN");
+    }
+}
 
 void ZeroDenoiseEditor::refresh(bool immediate)
 {
@@ -94,6 +113,10 @@ void ZeroDenoiseEditor::resized()
     amountLabel.setBounds(left.removeFromTop(18));
     amount.setBounds(left.reduced(10, 0));
     auto right = area;
+    auto row = right.removeFromTop(26);
+    learn.setBounds(row.removeFromLeft(row.getWidth() / 2).reduced(4, 0));
+    adaptive.setBounds(row.reduced(4, 0));
+    right.removeFromTop(6);
     modeLabel.setBounds(right.removeFromTop(18));
     mode.setBounds(right.removeFromTop(26).reduced(6, 0));
     right.removeFromTop(8);

@@ -151,6 +151,58 @@ static void testOnsetPreserved()
     CHECK(loss > -3.0, "tone onset 1-6 ms after start loses only %.1f dB", loss);
 }
 
+static void testHighSampleRates()
+{
+    for (double fs : { 44100.0, 96000.0, 192000.0 }) {
+        zd::ZeroDenoiser d;
+        d.prepare(fs, 1);
+        zd::DenoiserParams p; p.amount = 1.0f;
+        d.setParams(p);
+        const size_t n = (size_t) (fs * 3);
+        std::vector<float> x(n);
+        std::mt19937 rng(9);
+        std::normal_distribution<float> nd(0.f, 0.05f);
+        for (auto& v : x) v = nd(rng);
+        std::vector<float> y = x;
+        run(d, y, 0);
+        const double red = rmsDb(y, n * 2 / 3, n) - rmsDb(x, n * 2 / 3, n);
+        const double binHz = fs / d.getFFTSize();
+        CHECK(red < -25.0 && binHz > 40.0 && binHz < 50.0,
+              "%.1f kHz: white noise reduced %.1f dB, analysis resolution %.1f Hz/bin", fs / 1000.0, red, binHz);
+    }
+}
+
+static void testLearnAndFreeze()
+{
+    // 3 s noise (learned), then 25 s noise + steady tone. An adaptive tracker
+    // slowly absorbs a steady tone as "noise"; a frozen learned profile keeps it.
+    const double fs = 48000.0;
+    const size_t nLearn = (size_t) (3 * fs), n = nLearn + (size_t) (25 * fs);
+    std::vector<float> noise(n), tone(n, 0.f);
+    std::mt19937 rng(21);
+    std::normal_distribution<float> nd(0.f, 0.02f);
+    for (auto& v : noise) v = nd(rng);
+    for (size_t i = nLearn; i < n; ++i) tone[i] = 0.1f * std::sin(2.f * (float) M_PI * 440.f * (float) i / (float) fs);
+    double toneKeep[2] = { 0, 0 };
+    for (int mode = 0; mode < 2; ++mode) {
+        zd::ZeroDenoiser d;
+        d.prepare(fs, 1);
+        zd::DenoiserParams p; p.amount = 1.0f; p.learn = true;
+        d.setParams(p);
+        std::vector<float> y(n), toneOut(n);
+        for (size_t i = 0; i < n; ++i) y[i] = noise[i] + tone[i];
+        for (size_t pos = 0; pos < n; pos += 480) {
+            if (pos >= nLearn && p.learn) { p.learn = false; p.adaptive = (mode == 0); d.setParams(p); }
+            float* ptr = y.data() + pos;
+            d.process(&ptr, 1, (int) std::min<size_t>(480, n - pos));
+        }
+        // level of the output in the last 3 s vs the tone alone
+        toneKeep[mode] = rmsDb(y, n - (size_t) (3 * fs), n) - rmsDb(tone, n - (size_t) (3 * fs), n);
+    }
+    CHECK(toneKeep[1] > -1.0, "learned + frozen profile keeps a 25 s steady tone (%.1f dB)", toneKeep[1]);
+    std::printf("     (adaptive mode after 25 s: %.1f dB)\n", toneKeep[0]);
+}
+
 static void testRobustness()
 {
     zd::ZeroDenoiser d;
@@ -173,6 +225,8 @@ int main()
     testBlockSizeIndependence();
     testNoiseReduction();
     testOnsetPreserved();
+    testHighSampleRates();
+    testLearnAndFreeze();
     testRobustness();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;

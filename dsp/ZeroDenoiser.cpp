@@ -26,20 +26,29 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
 {
     fs = sampleRate;
     nCh = numChannels;
-    fftLong.prepare(kFFT);
-    fftFast.prepare(kFast);
-    fftMp.prepare(kFFT);
+    // Keep time/frequency resolution constant across sample rates: all sizes
+    // are defined at 44.1/48 kHz and scaled by a power of two.
+    scale = sampleRate > 100000.0 ? 4 : (sampleRate > 50000.0 ? 2 : 1);
+    nFFT = kBaseFFT * scale;
+    nBins = nFFT / 2 + 1;
+    hop = kBaseHop * scale;
+    nFast = kBaseFast * scale;
+    nTaps = kBaseTaps * scale;
+    maxLookahead = kBaseMaxLookahead * scale;
+    fftLong.prepare(nFFT);
+    fftFast.prepare(nFast);
+    fftMp.prepare(nFFT);
 
-    winLong.resize(kFFT);
-    for (int i = 0; i < kFFT; ++i) winLong[i] = hannAt(i, kFFT);
-    winFast.resize(kFast);
-    for (int i = 0; i < kFast; ++i) winFast[i] = hannAt(i, kFast);
-    fade.resize(kHop);
-    for (int i = 0; i < kHop; ++i) fade[i] = 0.5f - 0.5f * std::cos((float) M_PI * (i + 0.5f) / kHop);
+    winLong.resize(nFFT);
+    for (int i = 0; i < nFFT; ++i) winLong[i] = hannAt(i, nFFT);
+    winFast.resize(nFast);
+    for (int i = 0; i < nFast; ++i) winFast[i] = hannAt(i, nFast);
+    fade.resize(hop);
+    for (int i = 0; i < hop; ++i) fade[i] = 0.5f - 0.5f * std::cos((float) M_PI * (i + 0.5f) / hop);
 
-    // ~1/3-octave bands on the fast spectrum (bins 1..kFast/2)
+    // ~1/3-octave bands on the fast spectrum (bins 1..nFast/2)
     bandEdges.clear();
-    const int nbs = kFast / 2 + 1;
+    const int nbs = nFast / 2 + 1;
     bandEdges.push_back(1);
     while (bandEdges.back() < nbs - 1) {
         int w = std::max(2, (int) (bandEdges.back() * 0.26));
@@ -48,55 +57,63 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
 
     // Time constants are defined in seconds so they don't depend on hop/fs.
     // Values are tuned at 48 kHz with the fixed FFT sizes above.
-    const double frameT = kHop / fs;
+    const double frameT = hop / fs;
     aNoise = std::exp(-frameT / 0.08);
     aP = std::exp(-frameT / 0.05);
     aDD = std::exp(-frameT / 0.1);
     aFastRel = std::exp(-frameT / 0.03);
     aPs = std::exp(-frameT / 0.004);
-    warmFrames = (int) (0.1 * fs / kHop);
+    aLearn = std::exp(-frameT / 2.0); // learning = running mean, then ~2 s memory
+    warmFrames = (int) (0.1 * fs / hop);
 
-    frame.assign(kFFT, 0.0f);
-    tmp.assign(kFFT, 0.0f);
-    spec.assign(kBins, {});
-    specFast.assign(kFast / 2 + 1, {});
-    specMp.assign(kBins, {});
-    gain.assign(kBins, 1.0f);
-    gainOut.assign(kBins, 1.0f);
-    hTmp.assign(kTaps, 0.0f);
-    graw.assign(kBins, 0.0);
-    ps.assign(kFast / 2 + 1, 0.0);
+    frame.assign(nFFT, 0.0f);
+    tmp.assign(nFFT, 0.0f);
+    spec.assign(nBins, {});
+    specFast.assign(nFast / 2 + 1, {});
+    specMp.assign(nBins, {});
+    gain.assign(nBins, 1.0f);
+    gainOut.assign(nBins, 1.0f);
+    hTmp.assign(nTaps, 0.0f);
+    graw.assign(nBins, 0.0);
+    ps.assign(nFast / 2 + 1, 0.0);
     reset();
 }
 
 void ZeroDenoiser::reset()
 {
-    anaBuf.assign(2 * kFFT, 0.0f);
+    anaBuf.assign(2 * nFFT, 0.0f);
     anaPos = 0;
-    hist.assign(nCh, std::vector<float>(2 * kTaps, 0.0f));
+    hist.assign(nCh, std::vector<float>(2 * nTaps, 0.0f));
     histPos = 0;
     hopCount = 0;
-    delay.assign(nCh, std::vector<float>(kMaxLookahead + 1, 0.0f));
+    delay.assign(nCh, std::vector<float>(maxLookahead + 1, 0.0f));
     delayPos = 0;
-    curRev.assign(kTaps, 0.0f);
-    curRev[kTaps - 1] = 1.0f; // unity (reversed)
+    curRev.assign(nTaps, 0.0f);
+    curRev[nTaps - 1] = 1.0f; // unity (reversed)
     nextRev = curRev;
-    noise.assign(kBins, 0.0);
-    pbar.assign(kBins, 0.0);
-    prevS.assign(kBins, 0.0);
-    gPrev.assign(kBins, 1.0);
-    gfPrev.assign(kBins, 0.0);
-    psm.assign(kBins, 0.0);
+    noise.assign(nBins, 0.0);
+    pbar.assign(nBins, 0.0);
+    prevS.assign(nBins, 0.0);
+    gPrev.assign(nBins, 1.0);
+    gfPrev.assign(nBins, 0.0);
+    psm.assign(nBins, 0.0);
+    learnFrames = 0;
     fnoise.assign(bandEdges.size() - 1, 0.0);
     frames = 0;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
 {
-    samples = std::clamp(samples, 0, kMaxLookahead);
+    samples = std::clamp(samples, 0, maxLookahead);
     if (samples == lookahead) return;
     lookahead = samples;
     for (auto& d : delay) std::fill(d.begin(), d.end(), 0.0f);
+}
+
+void ZeroDenoiser::setParams(const DenoiserParams& p)
+{
+    if (p.learn && !params.learn) learnFrames = 0; // new learn pass starts fresh
+    params = p;
 }
 
 void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
@@ -118,23 +135,23 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
                 xd = d[r];
             }
             hist[c][histPos] = xd;
-            hist[c][histPos + kTaps] = xd;
+            hist[c][histPos + nTaps] = xd;
         }
         if (lookahead > 0 && !delay.empty()) delayPos = (delayPos + 1) % (int) delay[0].size();
-        histPos = (histPos + 1) % kTaps;
+        histPos = (histPos + 1) % nTaps;
         anaBuf[anaPos] = mono * invC;
-        anaBuf[anaPos + kFFT] = mono * invC;
-        anaPos = (anaPos + 1) % kFFT;
+        anaBuf[anaPos + nFFT] = mono * invC;
+        anaPos = (anaPos + 1) % nFFT;
 
         const float f = fade[hopCount];
         for (int c = 0; c < nc; ++c) {
             const float* w = hist[c].data() + histPos; // oldest..newest
-            const float yOld = dot(w, curRev.data(), kTaps);
-            const float yNew = dot(w, nextRev.data(), kTaps);
+            const float yOld = dot(w, curRev.data(), nTaps);
+            const float yNew = dot(w, nextRev.data(), nTaps);
             ch[c][n] = yOld + f * (yNew - yOld);
         }
 
-        if (++hopCount == kHop) {
+        if (++hopCount == hop) {
             hopCount = 0;
             analyse();
         }
@@ -144,20 +161,26 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 void ZeroDenoiser::analyse()
 {
     // ---- long analysis -------------------------------------------------
-    const float* x = anaBuf.data() + anaPos; // latest kFFT samples, oldest first
-    for (int i = 0; i < kFFT; ++i) frame[i] = x[i] * winLong[i];
+    const float* x = anaBuf.data() + anaPos; // latest nFFT samples, oldest first
+    for (int i = 0; i < nFFT; ++i) frame[i] = x[i] * winLong[i];
     fftLong.forwardReal(frame.data(), spec.data());
 
     const double xiH1 = std::pow(10.0, 1.5);
     const double xiFac = xiH1 / (1.0 + xiH1);
     const bool first = (frames == 0);
     const double a = frames > warmFrames ? aNoise : 0.5;
+    const bool warming = frames <= warmFrames;
+    // Learn: average the input as pure noise. Freeze: keep the profile fixed.
+    const bool learning = params.learn;
+    const bool frozen = !params.adaptive && !learning && !warming;
+    if (learning) ++learnFrames;
+    const double aL = std::max(1.0 - 1.0 / (double) std::max<long>(1, learnFrames), aLearn);
 
     const double amt = std::clamp((double) params.amount, 0.0, 1.0);
     const double over = 1.0 + 1.5 * amt;
     const double gmin = std::pow(10.0, -(amt * 40.0) / 20.0);
 
-    for (int k = 0; k < kBins; ++k) {
+    for (int k = 0; k < nBins; ++k) {
         const double Praw = (double) std::norm(spec[k]);
         if (first) psm[k] = Praw;
         psm[k] = aPs * psm[k] + (1.0 - aPs) * Praw; // ~4 ms periodogram smoothing
@@ -168,7 +191,8 @@ void ZeroDenoiser::analyse()
         pbar[k] = aP * pbar[k] + (1.0 - aP) * spp;
         if (pbar[k] > 0.99) spp = std::min(spp, 0.99);
         const double nEst = (1.0 - spp) * P + spp * noise[k];
-        noise[k] = a * noise[k] + (1.0 - a) * nEst;
+        if (learning) noise[k] = aL * noise[k] + (1.0 - aL) * P;
+        else if (!frozen) noise[k] = a * noise[k] + (1.0 - a) * nEst;
 
         const double nz = noise[k] * over;
         const double gamma = P / nz;
@@ -179,9 +203,9 @@ void ZeroDenoiser::analyse()
     ++frames;
 
     // 3-tap spectral smoothing (zero-padded edges), then prevS update
-    for (int k = 0; k < kBins; ++k) {
+    for (int k = 0; k < nBins; ++k) {
         const double l = k > 0 ? graw[k - 1] : 0.0;
-        const double r = k + 1 < kBins ? graw[k + 1] : 0.0;
+        const double r = k + 1 < nBins ? graw[k + 1] : 0.0;
         const double gs = 0.25 * l + 0.5 * graw[k] + 0.25 * r;
         gPrev[k] = gs;
         prevS[k] = gs * gs * psm[k];
@@ -189,19 +213,23 @@ void ZeroDenoiser::analyse()
 
     // ---- fast onset path ----------------------------------------------
     if (params.onsetPath) {
-        const float* xf = x + (kFFT - kFast);
-        for (int i = 0; i < kFast; ++i) tmp[i] = xf[i] * winFast[i];
+        const float* xf = x + (nFFT - nFast);
+        for (int i = 0; i < nFast; ++i) tmp[i] = xf[i] * winFast[i];
         fftFast.forwardReal(tmp.data(), specFast.data());
-        const int nbs = kFast / 2 + 1;
+        const int nbs = nFast / 2 + 1;
         for (int k = 0; k < nbs; ++k) ps[k] = (double) std::norm(specFast[k]);
         const int nb = (int) bandEdges.size() - 1;
-        const int m = kFFT / kFast;
+        const int m = nFFT / nFast;
         for (int b = 0; b < nb; ++b) {
             const int lo = bandEdges[b];
             const int hi = (b == nb - 1) ? nbs : bandEdges[b + 1];
             double Pb = 0.0;
             for (int k = lo; k < hi; ++k) Pb += ps[k];
-            if (frames <= warmFrames + 1) {
+            if (learning) {
+                fnoise[b] = learnFrames == 1 ? Pb : aL * fnoise[b] + (1.0 - aL) * Pb;
+            } else if (frozen) {
+                // keep learned band noise
+            } else if (frames <= warmFrames + 1) {
                 fnoise[b] = (frames == 1) ? Pb : 0.5 * fnoise[b] + 0.5 * Pb;
             } else {
                 const double sp = 1.0 / (1.0 + (1.0 + xiH1) * std::exp(-(Pb / fnoise[b]) * xiFac));
@@ -213,17 +241,17 @@ void ZeroDenoiser::analyse()
             const double gb = std::sqrt(std::clamp((snr - T) / (snr + 1e-12), 0.0, 1.0));
             // expand band -> long bins (each fast bin covers m long bins)
             const int kLo = lo * m;
-            const int kHi = (b == nb - 1) ? kBins : hi * m;
+            const int kHi = (b == nb - 1) ? nBins : hi * m;
             for (int k = kLo; k < kHi; ++k) {
                 const double gf = std::max(gb, aFastRel * gfPrev[k]);
                 gfPrev[k] = gf;
             }
         }
         for (int k = 0; k < bandEdges[0] * m; ++k) gfPrev[k] = aFastRel * gfPrev[k];
-        for (int k = 0; k < kBins; ++k) gPrev[k] = std::max(gPrev[k], gfPrev[k]);
+        for (int k = 0; k < nBins; ++k) gPrev[k] = std::max(gPrev[k], gfPrev[k]);
     }
 
-    for (int k = 0; k < kBins; ++k) {
+    for (int k = 0; k < nBins; ++k) {
         gain[k] = (float) (gmin + (1.0 - gmin) * gPrev[k]);
         gainOut[k] = gain[k];
     }
@@ -231,7 +259,7 @@ void ZeroDenoiser::analyse()
     // ---- new filter ----------------------------------------------------
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
-    for (int i = 0; i < kTaps; ++i) nextRev[i] = hTmp[kTaps - 1 - i];
+    for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
     // crossfade starts from the filter that just finished fading in
     // (curRev now holds the previous 'next' filter)
 }
@@ -239,22 +267,22 @@ void ZeroDenoiser::analyse()
 void ZeroDenoiser::designMinPhase(const float* g, float* hOut)
 {
     // real cepstrum of log magnitude
-    for (int k = 0; k < kBins; ++k) specMp[k] = FFT::cpx(std::log(std::max(g[k], 1e-5f)), 0.0f);
+    for (int k = 0; k < nBins; ++k) specMp[k] = FFT::cpx(std::log(std::max(g[k], 1e-5f)), 0.0f);
     fftMp.inverseReal(specMp.data(), tmp.data());
     // fold to causal
-    const int N = kFFT;
+    const int N = nFFT;
     frame[0] = tmp[0];
     for (int i = 1; i < N / 2; ++i) frame[i] = 2.0f * tmp[i];
     frame[N / 2] = tmp[N / 2];
     for (int i = N / 2 + 1; i < N; ++i) frame[i] = 0.0f;
     fftMp.forwardReal(frame.data(), specMp.data());
-    for (int k = 0; k < kBins; ++k) specMp[k] = std::exp(specMp[k]);
+    for (int k = 0; k < nBins; ++k) specMp[k] = std::exp(specMp[k]);
     fftMp.inverseReal(specMp.data(), tmp.data());
-    const int tail = kTaps / 4;
-    for (int i = 0; i < kTaps; ++i) hOut[i] = tmp[i];
+    const int tail = nTaps / 4;
+    for (int i = 0; i < nTaps; ++i) hOut[i] = tmp[i];
     for (int i = 0; i < tail; ++i) {
         const float c = std::cos(0.5f * (float) M_PI * (i + 0.5f) / tail);
-        hOut[kTaps - tail + i] *= c * c;
+        hOut[nTaps - tail + i] *= c * c;
     }
 }
 

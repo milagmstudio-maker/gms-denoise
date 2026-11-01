@@ -54,8 +54,8 @@ Xinerama, Xcursor, Xcomposite, Freetype, Fontconfig, GL dev packages).
 - `zd_host_check` loads the built VST3 through JUCE hosting and checks latency 0, parameters, processing and state.
 - CPU: about 4 % of one core per channel in the test container (naive FFT, no
   explicit SIMD).
-- FFT sizes are fixed in samples and tuned at 48 kHz. At 88.2/96 kHz the
-  frequency resolution halves, so the sizes still need to scale with sample rate.
+- All sizes scale by 2 at 88.2/96 kHz and by 4 at 176.4/192 kHz, so time and frequency resolution (about 47 Hz/bin) stay the same. CPU at 96 kHz is about 9 % of one core per channel.
+- Learn: while on, the input is averaged as pure noise. With Adaptive off, the learned profile stays frozen. With it on, tracking continues from the learned profile.
 - Versus the 21 ms STFT reference (5 dB SNR): noise in pauses is reduced as much or more, but speech onsets lose 2 to 4 dB more and STOI is 0.02 to 0.04 lower. See `prototype/results_v3.txt`.
 - Modes: Zero latency (0 samples), Low latency (128 samples, 2.7 ms at 48 kHz), High quality (512 samples, 10.7 ms). Lookahead delays the audio while analysis runs on the undelayed input. The editor always shows the current latency in ms and samples.
 - Licensing: JUCE 8 is dual-licensed (AGPLv3 or the JUCE commercial licence).

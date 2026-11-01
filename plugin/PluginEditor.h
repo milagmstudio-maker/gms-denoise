@@ -16,6 +16,10 @@ private:
     juce::Slider amount, output;
     juce::Label amountLabel, outputLabel, latencyLabel, modeLabel;
     juce::ComboBox mode;
+    juce::TextButton learn { "LEARN" };
+    juce::ToggleButton adaptive { "Adaptive" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt;
+    int blink = 0;
     juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
     int shownLatency = -1; float shownRate = 0.0f;

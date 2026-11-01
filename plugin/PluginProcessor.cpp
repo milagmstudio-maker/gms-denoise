@@ -11,6 +11,8 @@ ZeroDenoiseProcessor::ZeroDenoiseProcessor()
     amountParam = apvts.getRawParameterValue("amount");
     outputParam = apvts.getRawParameterValue("output");
     modeParam = apvts.getRawParameterValue("mode");
+    learnParam = apvts.getRawParameterValue("learn");
+    adaptParam = apvts.getRawParameterValue("adaptive");
     for (auto& m : meter) m.store(0.0f);
 }
 
@@ -26,6 +28,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ZeroDenoiseProcessor::create
         AudioParameterFloatAttributes().withLabel("dB")));
     p.push_back(std::make_unique<AudioParameterChoice>(
         ParameterID { "mode", 1 }, "Mode", modeNames(), 0));
+    p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "learn", 1 }, "Learn", false));
+    p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "adaptive", 1 }, "Adaptive", true));
     return { p.begin(), p.end() };
 }
 
@@ -45,18 +49,18 @@ void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int)
     sampleRateForUi.store((float) sampleRate);
 
     // log-spaced meter bands from 40 Hz to Nyquist over the analysis bins
-    const double binHz = sampleRate / zd::ZeroDenoiser::kFFT;
+    const double binHz = sampleRate / denoiser.getFFTSize();
     const double fLo = 40.0, fHi = sampleRate * 0.5;
     for (int b = 0; b <= kMeterBands; ++b) {
         const double f = fLo * std::pow(fHi / fLo, (double) b / kMeterBands);
-        meterEdges[(size_t) b] = juce::jlimit(1, zd::ZeroDenoiser::kBins, (int) std::lround(f / binHz));
+        meterEdges[(size_t) b] = juce::jlimit(1, denoiser.getNumBins(), (int) std::lround(f / binHz));
     }
 }
 
 void ZeroDenoiseProcessor::applyMode()
 {
     const int mode = juce::jlimit(0, 2, (int) modeParam->load());
-    const int la = kModeLookahead[mode];
+    const int la = kModeLookahead[mode] * denoiser.getScale();
     if (la != denoiser.getLookahead() || getLatencySamples() != la) {
         denoiser.setLookahead(la);
         setLatencySamples(la); // host re-aligns tracks (plugin delay compensation)
@@ -73,6 +77,8 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     applyMode();
     zd::DenoiserParams p = denoiser.getParams();
     p.amount = amountParam->load() * 0.01f;
+    p.learn = learnParam->load() > 0.5f;
+    p.adaptive = adaptParam->load() > 0.5f;
     denoiser.setParams(p);
     denoiser.process(buffer.getArrayOfWritePointers(), numCh, buffer.getNumSamples());
 
