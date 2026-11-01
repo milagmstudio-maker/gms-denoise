@@ -356,6 +356,23 @@ static void testPauseCleanup()
     CHECK(t1 > -1.0, "pause cleanup: harmonic voice kept (%.2f dB, off %.2f dB)", t1, t0);
 }
 
+static void testStartupHiss()
+{
+    // v0.12 regression: noise present from the first sample must be reduced within ~0.2 s
+    // (the estimate used to start from the zero-padded buffer and needed seconds).
+    for (int ai = 0; ai < 2; ++ai) {
+        zd::ZeroDenoiser d; d.prepare(48000, 1);
+        zd::DenoiserParams p; p.ai = ai == 1; p.amount = 0.7f; d.setParams(p); d.setLookahead(ai ? 480 : 0);
+        std::vector<float> x(48000 * 2);
+        std::mt19937 rng(11); std::normal_distribution<float> nd(0.f, 0.03f);
+        for (auto& v : x) v = nd(rng);
+        std::vector<float> y = x; run(d, y, 0);
+        const int la = ai ? 480 : 0;
+        const double r = rmsDb(y, 9600 + la, 48000 + la) - rmsDb(x, 9600, 48000);
+        CHECK(r < -15.0, "%s: noise from the first sample reduced %.1f dB within 0.2-1 s", ai ? "AI" : "zero latency", r);
+    }
+}
+
 int main()
 {
     testFFT();
@@ -370,6 +387,7 @@ int main()
     testAiMode();
     testReductionAndGate();
     testPauseCleanup();
+    testStartupHiss();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

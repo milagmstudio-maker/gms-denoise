@@ -26,6 +26,8 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_GATEOUT")) d.gateDetectOutput = true;
     if (std::getenv("ZD_PC")) p.pauseCleanup = true;
     if (std::getenv("ZD_OV")) d.onsetNeedsVad = true;
+    if (std::getenv("ZD_CAP")) d.assistCap = std::atof(std::getenv("ZD_CAP"));
+    if (std::getenv("ZD_HF")) d.hissFix = std::atoi(std::getenv("ZD_HF"));
     if (std::getenv("ZD_PCTHR")) d.pcThr = std::atof(std::getenv("ZD_PCTHR"));
     if (std::getenv("ZD_PCHOLD")) d.pcHold = std::atof(std::getenv("ZD_PCHOLD"));
     if (std::getenv("ZD_PCREL")) d.pcRel = std::atof(std::getenv("ZD_PCREL"));

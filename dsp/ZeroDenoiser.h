@@ -69,6 +69,8 @@ public:
     // pause cleanup tuning (zd_cli env): presence threshold, hold, release (s), which detectors
     double pcThr = 0.3, pcHold = 0.15, pcRel = 0.06; int pcSrc = 3; // bits: 1 network VAD, 2 voice guard (pitched + onsets), 4 DSP vad, 8 pitched only
     bool onsetNeedsVad = false;
+    double assistCap = 0.0316; // hiss assist: at most 30 dB below the network gain (v0.12; was 20)
+    int hissFix = 65; // v0.12 default 1|64. experiments: 1 tail gated, 2 no HF floor, 4 per-bin softening, 8 per-bin assist, 16 old warm-up tracking, 32 old fill
     double getPausePresence() const { return pcEnv; } // detector on the denoised output instead of the input
 
     // Latest per-bin gain (for metering/UI). Size getNumBins().
@@ -143,7 +145,7 @@ private:
     int lastLag = 0, combLag = 0;
     float gDspRawSafe(int) const { return 1.0f; } // tail floor is flat (bins above the voice are masked by it)
 public:
-    bool dbgFloor = true, dbgComb = true; double floorBias = 2.0, dbgTail = 0.25;
+    bool dbgFloor = true, dbgComb = true; double floorBias = 4.0, dbgTail = 0.25;
 private:
     double holdBudget = 0.0;
     double pcEnv = 1.0; long pcHoldCnt = 0;

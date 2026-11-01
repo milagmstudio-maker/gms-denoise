@@ -267,6 +267,7 @@ void ZeroDenoiser::computeDspGain(float* out)
     const bool first = (frames == 0);
     const double a = frames > warmFrames ? aNoise : 0.5;
     const bool warming = frames <= warmFrames;
+    const bool fillFrames = (hissFix & 32) == 0 && (long) frames * hop < nFFT;
     // Learn: average the input as pure noise. Freeze: keep the profile fixed.
     const bool learning = params.learn;
     // AI mode voice guard: a sustained pitched voice (scream, held note) must not
@@ -295,14 +296,18 @@ void ZeroDenoiser::computeDspGain(float* out)
         if (first) psm[k] = Praw;
         psm[k] = aPs * psm[k] + (1.0 - aPs) * Praw; // ~4 ms periodogram smoothing
         const double P = psm[k];
-        if (first) noise[k] = P + 1e-12;
+        // Until the analysis buffer is full the frame is mostly zero padding: take the
+        // level as the noise estimate directly (otherwise it starts near zero and the
+        // speech-presence logic needs ~1-3 s to climb to the real noise: hiss at the start).
+        if (first || fillFrames) noise[k] = P + 1e-12;
+        else if (warming && !learning && !frozen && !(hissFix & 16)) noise[k] = 0.5 * noise[k] + 0.5 * P;
         const double snrPost = P / noise[k];
         double spp = 1.0 / (1.0 + (1.0 + xiH1) * std::exp(-snrPost * xiFac));
         pbar[k] = aP * pbar[k] + (1.0 - aP) * spp;
         if (pbar[k] > 0.99) spp = std::min(spp, 0.99);
         const double nEst = (1.0 - spp) * P + spp * noise[k];
         if (learning) noise[k] = aL * noise[k] + (1.0 - aL) * P;
-        else if (!frozen) noise[k] = a * noise[k] + (1.0 - a) * nEst;
+        else if (!frozen && !(warming && !(hissFix & 16))) noise[k] = a * noise[k] + (1.0 - a) * nEst;
 
         const double nz = noise[k] * over;
         const double gamma = P / nz;
@@ -324,8 +329,18 @@ void ZeroDenoiser::computeDspGain(float* out)
         const double v = std::max(std::clamp((frac - 0.05) / 0.15, 0.0, 1.0), fastVad); // fast path: previous hop
         vad = v > vad ? v : aVadRel * vad + (1.0 - aVadRel) * v;
         const double ge = 1.0 * (1.0 - vad) + 0.5 * vad;
-        if (ge != 1.0)
-            for (int k = 0; k < nBins; ++k) graw[k] = (double) std::exp((float) ge * std::log((float) std::max(graw[k], 1e-12)));
+        if (ge != 1.0) {
+            if (hissFix & 4) {
+                // soften only bins that carry speech (a-priori SNR around/above 0 dB);
+                // noise-only bins under the voice (hiss above the voice's range) keep the full gain
+                for (int k = 0; k < nBins; ++k) {
+                    const double s = std::clamp(graw[k] / 0.5, 0.0, 1.0); // graw = xi/(1+xi): 0.5 at xi = 1
+                    const double e = 1.0 - (1.0 - ge) * s;
+                    graw[k] = std::exp(e * std::log(std::max(graw[k], 1e-12)));
+                }
+            } else
+                for (int k = 0; k < nBins; ++k) graw[k] = (double) std::exp((float) ge * std::log((float) std::max(graw[k], 1e-12)));
+        }
     }
 
     // 3-tap spectral smoothing (zero-padded edges), then prevS update
@@ -385,8 +400,12 @@ void ZeroDenoiser::computeDspGain(float* out)
 
     for (int k = 0; k < nBins; ++k) {
         double gm = gmin;
-        if (k >= hfStartBin) // keep some 'air' (sibilance, breath) while speech is present
-            gm = std::exp((1.0 - vad) * std::log(gmin) + vad * std::log(std::max(gmin, kHfFloor)));
+        if (k >= hfStartBin && !(hissFix & 2)) { // keep some 'air' (sibilance, breath) while speech is present
+            double v = vad;
+            // ...only where there is HF signal above the noise (hiss-only bins are not kept)
+            if (hissFix & 64) v *= std::clamp((psm[k] / std::max(noise[k], 1e-20) - 1.5) / 3.0, 0.0, 1.0);
+            gm = std::exp((1.0 - v) * std::log(gmin) + v * std::log(std::max(gmin, kHfFloor)));
+        }
         out[k] = (float) (gm + (1.0 - gm) * gPrev[k]);
     }
 }
@@ -510,10 +529,13 @@ void ZeroDenoiser::analyseAi()
         // keeps the network's more natural gains), capped at 20 dB so pauses do not
         // drop far below the noise left under the voice (no pumping).
         const double w = 1.0 - vad;
-        constexpr double kCap = 0.1; // -20 dB
+        const double kCap = assistCap; // -20 dB
         for (int k = 0; k < nBins; ++k) {
             const float a = gAi[k], d = gDsp[k];
-            gain[k] = d < a ? a * (float) std::exp(w * std::log(std::max((double) d / a, kCap))) : a;
+            double wk = w;
+            // noise-dominated bins (DSP gain low) get the assist even while a voice is present
+            if (hissFix & 8) wk = std::max(wk, std::clamp((0.5 - (double) d) / 0.4, 0.0, 1.0));
+            gain[k] = d < a ? a * (float) std::exp(wk * std::log(std::max((double) d / a, kCap))) : a;
         }
     }
     if (guard && dbgTail > 0.0) {
@@ -522,7 +544,16 @@ void ZeroDenoiser::analyseAi()
         tailEnv = std::max(std::min(1.0, voiced * dbgSat), aTail * tailEnv);
         // with pause cleanup the tail floor is lower (-20 dB): measured +2 dB in pauses, no loss on screams
         const float t = (float) ((params.pauseCleanup ? std::min(dbgTail, 0.1) : dbgTail) * tailEnv);
-        if (t > 1e-4f) for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], std::min(t, gDspRawSafe(k)));
+        if (t > 1e-4f) {
+            if (hissFix & 1) {
+                // only where there is signal above the long-term floor (hiss-only bins get no tail)
+                for (int k = 0; k < nBins; ++k) {
+                    const double q = 1.0 - 2.0 * floorBias * floorN[k] / std::max(psm[k], 1e-20);
+                    gain[k] = std::max(gain[k], std::min(t, (float) std::sqrt(std::clamp(q, 0.0, 1.0))));
+                }
+            } else
+                for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], std::min(t, gDspRawSafe(k)));
+        }
     }
     if (guard && voiced > 0.0) {
         // Voice guard: while a pitched voice is present the network may not cut

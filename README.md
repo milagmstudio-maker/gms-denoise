@@ -211,3 +211,25 @@ Result (cppeval, 6 noises x 5/10 dB): pause -19.6 -> -23.7 dB, OVRL 2.80 -> 2.84
 scream unchanged, anger onset -1.8 -> -3.5 dB. Office gap -18.6 -> -19.1 (clicks keep it open),
 cafe -20 -> -25, hiss -34 -> -40, aircon/traffic -35 -> -40, typing unchanged (0 dB).
 Reduction 60 with pause cleanup: pause -24.6, OVRL 2.88, but onsets -20.6 dB - keep 40.
+
+## Hiss fix (v0.12)
+
+User: "hiss is not removed at all". `prototype/hissdiag.py` (hiss at 10 dB SNR, residual by region
+and band) found two causes:
+1. Start-up bug (all modes): the first analysis frames are mostly zero padding, so the noise
+   estimate started near zero and the speech-presence logic needed 1-3 s to climb. First second
+   -0.5 dB (zero) / -1 dB (AI). Now the estimate is taken directly until the buffer is full and
+   averaged plainly during the 0.1 s warm-up: first second -19 dB (AI) / -18..-37 (zero); the
+   listening sample's 3 s lead-in: -3 dB -> -29 dB.
+2. Hiss under the voice in AI mode (-9.4 dB above 6 kHz vs -17 in v0.7): the voice guard's
+   floor reference was too permissive (min-statistics x2 bias, but 4 ms periodogram fluctuations
+   exceed it half the time), the tail floor was flat over all bins, and the DSP 'air' floor
+   (-12 dB above 7 kHz while speaking) kept hiss as well as breath. Now floorBias 4, tail floor only
+   where there is signal above the floor, air floor only where HF exceeds the noise estimate, hiss
+   assist cap 30 dB (was 20).
+Result (AI): under the voice >6 kHz -9.4 -> -14.6, 2-6 kHz -7.4 -> -8.5; right after speech
+-18.6 -> -24.4; lead-in 1-3 s -11 -> -30. 6-noise cppeval OVRL 2.81 -> 2.85, onsets -12.6 -> -12.3.
+Expressive: scream frames cut >6 dB 0.5 % -> 1.4 % (speech -0.07 -> -0.16 dB), anger 14.2 -> 15.0 %.
+Zero latency: under the voice >6 kHz -12.8 -> -16.9, OVRL 2.84 -> 2.86.
+Hiss in the voice band (0-2 kHz) under the voice stays at about -5 dB (AI) / -7 dB (zero): those
+bins carry the voice; removing it there needs a different (non-gain) method.
