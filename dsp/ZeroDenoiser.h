@@ -85,7 +85,8 @@ private:
     std::vector<double> noise, pbar, prevS, gPrev, gfPrev;
     std::vector<float> gain, gainOut, hTmp;
     std::vector<int> bandEdges;
-    std::vector<double> fnoise, graw, ps, psm;
+    std::vector<double> fnoise, graw, ps, psm, gRel;
+    double vad = 0.0, aRel = 0.0, aVadRel = 0.0;
     long frames = 0;
     int warmFrames = 0;
     double aNoise = 0, aP = 0, aDD = 0, aFastRel = 0, aPs = 0, aLearn = 0;

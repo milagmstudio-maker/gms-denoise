@@ -1,0 +1,34 @@
+from realeval import register, run_est, V1
+
+
+def cfg(name, la=0, **kw):
+    p = dict(V1); p.update(kw)
+    register(name)(lambda sigs, p=p, la=la: run_est(p, sigs, lookahead=la))
+
+
+cfg("over07", over_k=0.7)
+cfg("sfloor12", speech_floor_db=12)
+cfg("sfloor12_over07", speech_floor_db=12, over_k=0.7)
+cfg("cep", cep=True)
+cfg("rel20", rel_tau=0.02)
+cfg("ps10", psmooth=0.010)
+cfg("rel40", rel_tau=0.04)
+cfg("r20_sf12_o07", rel_tau=0.02, speech_floor_db=12, over_k=0.7)
+cfg("r40_sf12_o07", rel_tau=0.04, speech_floor_db=12, over_k=0.7)
+cfg("r20_sf12_o07_f55", rel_tau=0.02, speech_floor_db=12, over_k=0.7, floor_db=55)
+cfg("r20_sf9_o1_f55", rel_tau=0.02, speech_floor_db=9, over_k=1.0, floor_db=55)
+cfg("r20_g05", rel_tau=0.02, gexp=0.5)
+cfg("r20_gsp05", rel_tau=0.02, gexp_sp=0.5)
+cfg("r20_gsp05_f55", rel_tau=0.02, gexp_sp=0.5, floor_db=55)
+cfg("r20_gsp05_sf12_f55", rel_tau=0.02, gexp_sp=0.5, speech_floor_db=12, floor_db=55)
+cfg("r20_gsp06_o1_f55", rel_tau=0.02, gexp_sp=0.6, over_k=1.0, floor_db=55)
+cfg("r20_g05_f60", rel_tau=0.02, gexp=0.5, floor_db=60)
+B = dict(rel_tau=0.02, gexp_sp=0.5, floor_db=55)
+cfg("B_gsp04", **dict(B, gexp_sp=0.4))
+cfg("B_g12", **dict(B, gexp=1.2))
+cfg("B_vad30", **dict(B, vad_rel=0.3))
+cfg("B_la128", la=128, **B)
+cfg("B_la512", la=512, **B)
+cfg("v1_la512", la=512)
+cfg("v2_zero", **B)
+cfg("v2_hq", la=512, **B)

@@ -32,7 +32,9 @@ class GainEstimator:
     and a floor driven by a single 'amount' control (0..1)."""
 
     def __init__(self, n_fft=1024, hop=256, window="hann", tail=128, amount=0.7,
-                 fs=FS, dd_tau=0.1, rel_tau=0.02, omlsa=False, fast=0, fast_rel=0.03, fthr=4.0, fband_min=2, psmooth=0.0):
+                 fs=FS, dd_tau=0.1, rel_tau=0.02, omlsa=False, fast=0, fast_rel=0.03, fthr=4.0, fband_min=2, psmooth=0.0,
+                 over_k=1.5, speech_floor_db=None, vad_rel=0.15, cep=False, cep_tau=0.3, floor_db=40.0,
+                 gexp=1.0, gexp_sp=None):
         self.n, self.hop, self.fs = n_fft, hop, fs
         self.win = hann(n_fft) if window == "hann" else asym_window(n_fft, tail)
         self.amount = amount
@@ -49,6 +51,13 @@ class GainEstimator:
         self.xi_h1 = 10 ** (15 / 10)
         self.g_prev = np.ones(nb)
         self.a_ps = np.exp(-frame_t / psmooth) if psmooth > 0 else 0.0
+        self.over_k, self.speech_floor_db, self.floor_db, self.gexp, self.gexp_sp = over_k, speech_floor_db, floor_db, gexp, gexp_sp
+        self.a_vad_rel = np.exp(-frame_t / vad_rel)
+        self.vad = 0.0
+        self.cep = cep
+        self.a_cep = np.exp(-frame_t / cep_tau)
+        self.a_cep_env = np.exp(-frame_t / 0.002)
+        self.cep_prev = None
         self.Psm = None
         self.frames = 0
         self.warm = int(0.1 * fs / hop)
@@ -85,13 +94,23 @@ class GainEstimator:
         self.frames += 1
         # --- gain ---
         amt = self.amount
-        over = 1.0 + 1.5 * amt
-        gmin = 10 ** (-(amt * 40.0) / 20)
+        over = 1.0 + self.over_k * amt
+        gmin = 10 ** (-(amt * self.floor_db) / 20)
         nz = self.noise * over
         gamma = P / nz
         xi_dd = self.a_dd * self.prev_s / nz + (1 - self.a_dd) * np.maximum(gamma - 1, 0)
         xi_dd = np.maximum(xi_dd, 1e-4)
         g = xi_dd / (1 + xi_dd)
+        if self.speech_floor_db is not None or self.gexp_sp is not None:
+            # frame-level speech presence: share of 100 Hz-4 kHz bins with a-priori SNR > 0 dB
+            k0, k1 = int(100 / self.fs * self.n), int(4000 / self.fs * self.n)
+            v = np.clip((np.mean(xi_dd[k0:k1] > 1.0) - 0.05) / 0.15, 0, 1)
+            self.vad = v if v > self.vad else self.a_vad_rel * self.vad + (1 - self.a_vad_rel) * v
+        ge = self.gexp if self.gexp_sp is None else self.gexp * (1 - self.vad) + self.gexp_sp * self.vad
+        if ge != 1.0:
+            g = g ** ge
+        if self.cep:
+            g = self.cepstral_smooth(g)
         # spectral smoothing (3-bin) to tame musical noise
         g = np.convolve(g, [0.25, 0.5, 0.25], mode="same")
         # temporal: instant attack, smoothed release
@@ -135,6 +154,9 @@ class GainEstimator:
             gf = np.maximum(gl, self.a_frel * self.gf_prev)
             self.gf_prev = gf
             g = np.maximum(g, gf)
+        if self.speech_floor_db is not None:
+            fs_lin = max(gmin, 10 ** (-self.speech_floor_db / 20))
+            gmin = np.exp((1 - self.vad) * np.log(gmin) + self.vad * np.log(fs_lin))
         if self.omlsa:
             # speech-presence weighting (OM-LSA flavour): p from a-priori SNR,
             # smoothed over frequency (local + wide) to reject isolated peaks
@@ -147,6 +169,28 @@ class GainEstimator:
         else:
             g = gmin + (1 - gmin) * g
         return g, X
+
+
+def _cep_smooth(self, g):
+    lg = np.log(np.maximum(g, 1e-4))
+    c = np.fft.irfft(lg, self.n)
+    q = self.n // 2 + 1
+    cc = c[:q]
+    if self.cep_prev is None:
+        self.cep_prev = cc.copy()
+    alpha = np.full(q, self.a_cep)
+    alpha[:8] = self.a_cep_env                      # spectral envelope: follow quickly
+    lo, hi = int(self.fs / 400), int(self.fs / 70)  # pitch range
+    hi = min(hi, q - 3)
+    pk = lo + int(np.argmax(cc[lo:hi]))
+    if cc[pk] > 0.2:
+        alpha[pk - 2:pk + 3] = self.a_cep_env       # keep harmonic structure of voiced speech
+    self.cep_prev = alpha * self.cep_prev + (1 - alpha) * cc
+    full = np.concatenate([self.cep_prev, self.cep_prev[1:-1][::-1]])
+    return np.clip(np.exp(np.fft.rfft(full).real), 0, 1)
+
+
+GainEstimator.cepstral_smooth = _cep_smooth
 
 
 def compute_gains(x, est: GainEstimator):

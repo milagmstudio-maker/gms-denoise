@@ -61,3 +61,22 @@ Xinerama, Xcursor, Xcomposite, Freetype, Fontconfig, GL dev packages).
 - Licensing: JUCE 8 is dual-licensed (AGPLv3 or the JUCE commercial licence).
   Check the JUCE terms before distributing closed-source builds. The VST3 SDK
   has been MIT-licensed since VST 3.8.
+
+## v2 tuning on real noise (2026-11-01)
+
+Goal: keep the voice natural while still removing the noise. Evaluation used 12
+real noise recordings (MS-SNSD / DEMAND, 16 kHz upsampled), full-band synthetic
+hiss and hum, 4 EARS speakers, at 5 and 10 dB SNR. Scores are DNSMOS P.835
+(`prototype/realeval.py`); DNSMOS works at 16 kHz, so content above 8 kHz is not judged.
+
+| Version | SIG (voice) | BAK (background) | OVRL | speech-component spectral distortion |
+|---|---|---|---|---|
+| unprocessed | 3.22 | 2.89 | 2.57 | 0 dB |
+| STFT reference (21 ms) | 3.31 | 3.63 | 2.86 | 4.9 dB |
+| v1 zero latency | 3.15 | 3.65 | 2.76 | 6.9 dB |
+| **v2 zero latency** | **3.31** | **3.72** | **2.90** | 4.8 dB |
+| v2 High quality (10.7 ms) | 3.33 | 3.69 | 2.91 | 4.2 dB |
+
+v2 changes: while speech is present the gain is softened (g^0.5), so residual noise under the voice is
+masked instead of being carved out. Between words, attenuation goes up to 55 dB, and gains release
+over 20 ms instead of jumping every 1.3 ms.

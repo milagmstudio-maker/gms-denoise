@@ -63,6 +63,8 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aDD = std::exp(-frameT / 0.1);
     aFastRel = std::exp(-frameT / 0.03);
     aPs = std::exp(-frameT / 0.004);
+    aRel = std::exp(-frameT / 0.02);
+    aVadRel = std::exp(-frameT / 0.15);
     aLearn = std::exp(-frameT / 2.0); // learning = running mean, then ~2 s memory
     warmFrames = (int) (0.1 * fs / hop);
 
@@ -97,6 +99,8 @@ void ZeroDenoiser::reset()
     gPrev.assign(nBins, 1.0);
     gfPrev.assign(nBins, 0.0);
     psm.assign(nBins, 0.0);
+    gRel.assign(nBins, 1.0);
+    vad = 0.0;
     learnFrames = 0;
     fnoise.assign(bandEdges.size() - 1, 0.0);
     frames = 0;
@@ -178,7 +182,8 @@ void ZeroDenoiser::analyse()
 
     const double amt = std::clamp((double) params.amount, 0.0, 1.0);
     const double over = 1.0 + 1.5 * amt;
-    const double gmin = std::pow(10.0, -(amt * 40.0) / 20.0);
+    // Up to 55 dB of attenuation where there is no speech.
+    const double gmin = std::pow(10.0, -(amt * 55.0) / 20.0);
 
     for (int k = 0; k < nBins; ++k) {
         const double Praw = (double) std::norm(spec[k]);
@@ -202,11 +207,29 @@ void ZeroDenoiser::analyse()
     }
     ++frames;
 
+    // Frame-level speech presence (share of 100 Hz-4 kHz bins with a-priori
+    // SNR > 0 dB). While speech is present the gain curve is softened
+    // (g^0.5) so the voice keeps its natural timbre; residual noise under the
+    // voice is largely masked. Between words the full Wiener gain applies.
+    {
+        const int k0 = (int) (100.0 / fs * nFFT), k1 = (int) (4000.0 / fs * nFFT);
+        int cnt = 0;
+        for (int k = k0; k < k1; ++k) cnt += graw[k] > 0.5 ? 1 : 0; // xi > 1
+        const double frac = (double) cnt / (double) std::max(1, k1 - k0);
+        const double v = std::clamp((frac - 0.05) / 0.15, 0.0, 1.0);
+        vad = v > vad ? v : aVadRel * vad + (1.0 - aVadRel) * v;
+        const double ge = 1.0 * (1.0 - vad) + 0.5 * vad;
+        if (ge != 1.0)
+            for (int k = 0; k < nBins; ++k) graw[k] = std::pow(graw[k], ge);
+    }
+
     // 3-tap spectral smoothing (zero-padded edges), then prevS update
     for (int k = 0; k < nBins; ++k) {
         const double l = k > 0 ? graw[k - 1] : 0.0;
         const double r = k + 1 < nBins ? graw[k + 1] : 0.0;
-        const double gs = 0.25 * l + 0.5 * graw[k] + 0.25 * r;
+        double gs = 0.25 * l + 0.5 * graw[k] + 0.25 * r;
+        gs = std::max(gs, aRel * gRel[k] + (1.0 - aRel) * gs); // instant attack, 20 ms release
+        gRel[k] = gs;
         gPrev[k] = gs;
         prevS[k] = gs * gs * psm[k];
     }
