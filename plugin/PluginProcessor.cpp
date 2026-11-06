@@ -17,6 +17,7 @@ ZeroDenoiseProcessor::ZeroDenoiseProcessor()
     reductionParam = apvts.getRawParameterValue("reduction");
     gateParam = apvts.getRawParameterValue("gate");
     pauseParam = apvts.getRawParameterValue("pauseclean");
+    strengthParam = apvts.getRawParameterValue("strength");
     for (auto& m : meter) m.store(0.0f);
 }
 
@@ -36,6 +37,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ZeroDenoiseProcessor::create
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "adaptive", 1 }, "Adaptive", true));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "voiceprotect", 1 }, "Strong Voice Protect", false));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { "pauseclean", 1 }, "Pause Cleanup", false));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { "strength", 1 }, "Strength", strengthNames(), 1));
     // Reduction: how far noise is pulled down at most (dB). Amount sets how eagerly it is removed.
     p.push_back(std::make_unique<AudioParameterFloat>(
         ParameterID { "reduction", 1 }, "Reduction", NormalisableRange<float>(0.0f, 80.0f, 0.5f), 40.0f,
@@ -101,6 +103,7 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     p.reductionDb = reductionParam->load();
     p.gateDb = gateParam->load();
     p.pauseCleanup = pauseParam->load() > 0.5f;
+    p.maxJumpDb = kStrengthJumpDb[juce::jlimit(0, 2, (int) strengthParam->load())];
     p.ai = aiModeForUi.load();
     denoiser.setParams(p);
     denoiser.process(buffer.getArrayOfWritePointers(), numCh, buffer.getNumSamples());

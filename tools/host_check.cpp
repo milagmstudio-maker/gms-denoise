@@ -29,7 +29,7 @@ int main(int argc, char** argv)
     auto params = inst->getParameters();
     juce::StringArray names;
     for (auto* p : params) names.add(p->getName(32));
-    check(names.contains("Amount") && names.contains("Output") && names.contains("Mode") && names.contains("Strong Voice Protect") && names.contains("Reduction") && names.contains("Gate Threshold") && names.contains("Pause Cleanup"), "parameters: " + names.joinIntoString(", "));
+    check(names.contains("Amount") && names.contains("Output") && names.contains("Mode") && names.contains("Strong Voice Protect") && names.contains("Reduction") && names.contains("Gate Threshold") && names.contains("Pause Cleanup") && names.contains("Strength"), "parameters: " + names.joinIntoString(", "));
 
     juce::AudioProcessorParameter* mp = nullptr;
     for (auto* p : params) if (p->getName(32) == "Mode") mp = p;
@@ -48,8 +48,12 @@ int main(int argc, char** argv)
                   mp->getCurrentValueAsText() + " reports latency " + juce::String(inst->getLatencySamples()));
         }
     }
-    // amount -> 100 %
+    // amount -> 100 %, Strength -> Strong (no steadiness limit: tests the full removal depth)
     params[0]->setValueNotifyingHost(1.0f);
+    juce::AudioProcessorParameter* sp = nullptr;
+    for (auto* p : params) if (p->getName(32) == "Strength") sp = p;
+    check(sp != nullptr && sp->getCurrentValueAsText() == "Medium", "Strength default = Medium");
+    if (sp) sp->setValueNotifyingHost(1.0f);
     auto noiseRun = [&](int block, double& redOut) {
         std::mt19937 rng(1);
         std::normal_distribution<float> nd(0.f, 0.05f);

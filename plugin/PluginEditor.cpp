@@ -52,8 +52,12 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     mode.addItemList(ZeroDenoiseProcessor::modeNames(), 1);
     addAndMakeVisible(mode);
     modeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "mode", mode);
+    strength.addItemList(ZeroDenoiseProcessor::strengthNames(), 1);
+    strength.setTooltip("Gentle: background stays steady when the voice starts (less removed between words). Strong: deepest removal, the background can 'breathe' with the voice.");
+    addAndMakeVisible(strength);
+    strengthAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "strength", strength);
 
-    for (auto* l : { &amountLabel, &outputLabel, &latencyLabel, &modeLabel, &reductionLabel, &gateLabel, &gateStatus }) {
+    for (auto* l : { &amountLabel, &outputLabel, &latencyLabel, &modeLabel, &reductionLabel, &gateLabel, &gateStatus, &strengthLabel }) {
         l->setJustificationType(juce::Justification::centred);
         l->setColour(juce::Label::textColourId, dim);
         addAndMakeVisible(l);
@@ -62,6 +66,7 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     outputLabel.setText("OUTPUT", juce::dontSendNotification);
     modeLabel.setText("MODE", juce::dontSendNotification);
     reductionLabel.setText("REDUCTION", juce::dontSendNotification);
+    strengthLabel.setText("STRENGTH", juce::dontSendNotification);
     gateLabel.setText("GATE", juce::dontSendNotification);
     gateStatus.setFont(juce::FontOptions(12.0f));
     latencyLabel.setJustificationType(juce::Justification::centredRight);
@@ -169,4 +174,7 @@ void ZeroDenoiseEditor::resized()
     mode.setBounds(right.removeFromTop(26).reduced(6, 0));
     voiceProtect.setBounds(right.removeFromTop(24).reduced(4, 0));
     pauseClean.setBounds(right.removeFromTop(24).reduced(4, 0));
+    right.removeFromTop(4);
+    strengthLabel.setBounds(right.removeFromTop(18));
+    strength.setBounds(right.removeFromTop(26).reduced(6, 0));
 }

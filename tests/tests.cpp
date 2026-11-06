@@ -373,6 +373,44 @@ static void testStartupHiss()
     }
 }
 
+static void testSteadyBackground()
+{
+    // Voice (harmonic tone) on/off over steady noise: with maxJumpDb the noise between words
+    // may not drop more than ~that far below its level under the voice.
+    for (int ai = 0; ai < 2; ++ai) {
+        double jump[2];
+        for (int j = 0; j < 2; ++j) {
+            zd::ZeroDenoiser d; d.prepare(48000, 2);
+            zd::DenoiserParams p; p.ai = ai == 1; p.amount = 0.7f; p.maxJumpDb = j ? 6.0f : 0.0f;
+            d.setParams(p); d.setLookahead(ai ? 480 : 0);
+            const int n = 48000 * 12, la = ai ? 480 : 0;
+            std::vector<float> nz(n), v(n, 0.0f);
+            std::mt19937 rng(21); std::normal_distribution<float> nd(0.f, 0.02f);
+            for (auto& s : nz) s = nd(rng);
+            for (int i = 0; i < n; ++i)
+                if ((i / 48000) % 2 == 1)
+                    for (int h = 1; h <= 10; ++h) v[i] += 0.06f / h * (float) std::sin(2.0 * M_PI * 180.0 * h * i / 48000.0);
+            // shadow: process [mix+v, mix-v] as two channels -> noise path = (y0+y1)/2 - (y0-y1)/2 ... use stereo
+            std::vector<float> a(n), b(n);
+            for (int i = 0; i < n; ++i) { a[i] = nz[i] + 2.0f * v[i]; b[i] = nz[i]; }
+            float* ch[2] = { a.data(), b.data() };
+            for (int pos = 0; pos < n; pos += 512) { float* c2[2] = { ch[0] + pos, ch[1] + pos }; d.process(c2, 2, std::min(512, n - pos)); }
+            // channel mean = nz + v (the analysed mix); noise component = b processed... approximate:
+            // b carries only noise through the same linear filter.
+            double eOn = 0, eOff = 0, iOn = 0, iOff = 0;
+            for (int i = 48000 * 4; i + la < n; ++i) {
+                const bool on = (i / 48000) % 2 == 1 && (i % 48000) > 4800;
+                const bool off = (i / 48000) % 2 == 0 && (i % 48000) > 14400;
+                if (on) { eOn += (double) b[i + la] * b[i + la]; iOn += (double) nz[i] * nz[i]; }
+                if (off) { eOff += (double) b[i + la] * b[i + la]; iOff += (double) nz[i] * nz[i]; }
+            }
+            jump[j] = 10 * std::log10((eOn / iOn) / (eOff / iOff));
+        }
+        CHECK(jump[1] < 8.0 && jump[1] < jump[0] - 3.0, "%s: background jump when the voice starts %.1f dB with 6 dB limit (no limit: %.1f dB)",
+              ai ? "AI" : "zero latency", jump[1], jump[0]);
+    }
+}
+
 int main()
 {
     testFFT();
@@ -388,6 +426,7 @@ int main()
     testReductionAndGate();
     testPauseCleanup();
     testStartupHiss();
+    testSteadyBackground();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

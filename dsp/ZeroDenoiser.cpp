@@ -80,6 +80,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aRel = std::exp(-frameT / 0.02);
     aSlow = std::exp(-frameT / 0.03);
     aTail = std::exp(-frameT / 0.15);
+    aVoiceRef = 1.0 - std::exp(-frameT / 1.5);
     gateAtkC = std::exp(-1.0 / (0.0005 * fs));
     gateRelC = std::exp(-1.0 / (0.010 * fs));
     gateOpenC = std::exp(-1.0 / (0.0007 * fs));
@@ -114,6 +115,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     gAi.assign(nBins, 1.0f);
     gDsp.assign(nBins, 1.0f);
     gFloor.assign(nBins, 1.0f);
+    voiceRefPow.assign(nBins, 0.1); // before any voice: assume ~-10 dB under a voice
     hTmp.assign(nTaps, 0.0f);
     graw.assign(nBins, 0.0);
     ps.assign(nFast / 2 + 1, 0.0);
@@ -160,6 +162,7 @@ void ZeroDenoiser::reset()
     floorRing.assign(kFloorSubs, std::vector<double>(nBins, 1e300));
     floorRingPos = 0; floorHop = 0; floorFilled = 0;
     pcEnv = 1.0; pcHoldCnt = 0;
+    voiceRefPow.assign(nBins, 0.1);
     gateEnv = 0.0; gateGain = 1.0; gateOpen = true; gateHold = gateHoldLen; gateLevelDb = -120.0f;
 }
 
@@ -247,6 +250,7 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 void ZeroDenoiser::analyse()
 {
     computeDspGain(gain.data());
+    applySteadiness(vad);
     for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
@@ -612,6 +616,7 @@ void ZeroDenoiser::analyseAi()
     } else {
         pcEnv = 1.0; pcHoldCnt = 0;
     }
+    applySteadiness(std::max({ aiVad, voiced, vad }));
     {   // the Reduction setting is a hard limit (hiss assist may otherwise go below it)
         const float gmin = (float) floorGain();
         for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], gmin);
@@ -620,6 +625,24 @@ void ZeroDenoiser::analyseAi()
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
     for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
+}
+
+void ZeroDenoiser::applySteadiness(double presence)
+{
+    // Steady background (v0.13): under a voice, noise in the voice's own bins can only be
+    // reduced a little (the bins carry the voice), while between words it can be removed
+    // deeply. The jump between the two is heard as the background 'breathing' with the
+    // voice. Track, per bin, the typical gain while a voice is present (power average, ~1.5 s)
+    // and never let the gain without voice fall more than maxJumpDb below it.
+    const bool speaking = presence > 0.5;
+    if (speaking) {
+        for (int k = 0; k < nBins; ++k)
+            voiceRefPow[k] += aVoiceRef * ((double) gain[k] * gain[k] - voiceRefPow[k]);
+    }
+    if (params.maxJumpDb <= 0.0f) return;
+    const float off = (float) (-params.maxJumpDb / 20.0 * std::log(10.0));
+    for (int k = 0; k < nBins; ++k)
+        gain[k] = std::max(gain[k], std::exp(0.5f * std::log((float) std::max(voiceRefPow[k], 1e-12)) + off));
 }
 
 double ZeroDenoiser::floorGain() const

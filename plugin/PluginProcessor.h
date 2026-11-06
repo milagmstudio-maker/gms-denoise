@@ -65,6 +65,13 @@ private:
     std::atomic<float>* reductionParam = nullptr;
     std::atomic<float>* gateParam = nullptr;
     std::atomic<float>* pauseParam = nullptr;
+    std::atomic<float>* strengthParam = nullptr;
+public:
+    // Strength: how far the background may drop between words compared with under the voice
+    // (Gentle 6 dB / Medium 12 dB / Strong: no limit). Smaller = less 'breathing'.
+    static juce::StringArray strengthNames() { return { "Gentle", "Medium", "Strong" }; }
+    static constexpr float kStrengthJumpDb[3] = { 6.0f, 12.0f, 0.0f };
+private:
     void applyMode();
     juce::SmoothedValue<float> outGain;
     std::array<int, kMeterBands + 1> meterEdges {};

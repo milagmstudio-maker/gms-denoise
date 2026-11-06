@@ -233,3 +233,16 @@ Expressive: scream frames cut >6 dB 0.5 % -> 1.4 % (speech -0.07 -> -0.16 dB), a
 Zero latency: under the voice >6 kHz -12.8 -> -16.9, OVRL 2.84 -> 2.86.
 Hiss in the voice band (0-2 kHz) under the voice stays at about -5 dB (AI) / -7 dB (zero): those
 bins carry the voice; removing it there needs a different (non-gain) method.
+
+## Strength / steady background (v0.13)
+
+User: hiss sounds unnatural. `prototype/pumpdiag.py` measured the cause: with hiss at 10 dB SNR the
+background drops ~26 dB between words but only ~10 dB under the voice, so it 'breathes' with the
+voice (jump 25.7 dB AI, 24.0 zero). New `DenoiserParams::maxJumpDb` / plugin "Strength":
+per bin, a power average (~1.5 s) of the gain while a voice is present; without a voice the gain may
+not fall more than maxJumpDb below it. Gentle 6 dB, Medium 12 dB (default), Strong = no limit (old).
+Hiss 10 dB SNR (AI): jump 25.7 -> 5.6 (Gentle) / 11.1 (Medium); pauses -35.9 -> -15.3 / -21.3.
+At 20 dB SNR: 28.1 -> 5.9 / 11.5. 6-noise cppeval (AI): SIG 3.23 -> 3.39 / 3.32, BAK 3.71 -> 3.39 /
+3.56, OVRL 2.84 -> 2.82 / 2.84, onsets -12.1 -> -6.6 / -7.8 dB (pause floor no longer gates
+onsets). DNSMOS does not reward steadiness; the gain is in SIG and onsets, paid in pause depth.
+Before any voice the reference is -10 dB, so noise-only input reaches -22 dB in Medium.

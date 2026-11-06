@@ -62,6 +62,12 @@ for _h in ("0", "1", "9", "65", "73"):
     MODES["y_h" + _h] = ({"ZD_AI": "1", "ZD_HF": _h, "ZD_FBIAS": "4"}, 480)
 MODES["z_h65"] = ({"ZD_HF": "65", "ZD_FBIAS": "4"}, 0)
 MODES["y_cap30"] = ({"ZD_AI": "1", "ZD_HF": "65", "ZD_FBIAS": "4", "ZD_CAP": "0.0316"}, 480)
+for _r in ("10", "15", "20", "30"):
+    MODES["ai_r" + _r] = ({"ZD_AI": "1", "ZD_RED": _r}, 480)
+    MODES["zero_r" + _r] = ({"ZD_RED": _r}, 0)
+for _j in ("6", "9", "12", "18"):
+    MODES["ai_j" + _j] = ({"ZD_AI": "1", "ZD_JUMP": _j}, 480)
+    MODES["zero_j" + _j] = ({"ZD_JUMP": _j}, 0)
 MODES["ai_pure"] = ({"ZD_AI": "1", "ZD_AI_PURE": "1"}, 480)  # network gains only
 AMOUNT = os.environ.get("AMOUNT", "0.7")
 

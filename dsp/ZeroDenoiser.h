@@ -30,6 +30,7 @@ struct DenoiserParams {
     bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
     bool aiStrongVoice = false; // AI mode: protect quieter voices too (screams fully kept, more background chatter survives)
     bool pauseCleanup = false;  // AI mode: where no voice is detected, pull everything down to the Reduction floor (v0.11)
+    float maxJumpDb = 0.0f;     // steady background: max dB the noise may drop between words vs under the voice (0 = no limit)
     float reductionDb = -1.0f;  // maximum attenuation in dB; < 0: follow amount (amount x 55 dB)
     float gateDb = -200.0f;     // gate threshold on the input level (dBFS); <= kGateOff: gate off
     static constexpr float kGateOff = -90.0f;
@@ -84,7 +85,9 @@ private:
     void updateFloor();              // minimum-statistics noise floor (voice guard reference)
     double computeVoicing();         // 0..1 periodicity of the above-noise signal (300 Hz-5 kHz, f0 100-1600 Hz)
 
-    double floorGain() const; // linear minimum gain from reductionDb / amount
+    double floorGain() const;
+    void applySteadiness(double presence);
+    std::vector<double> voiceRefPow; double aVoiceRef = 0.0; // linear minimum gain from reductionDb / amount
 
     DenoiserParams params;
     double fs = 48000.0;
