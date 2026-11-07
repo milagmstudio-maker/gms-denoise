@@ -1,12 +1,28 @@
 cmake_minimum_required(VERSION 3.22)
-project(ZeroDenoise VERSION 0.1.0 LANGUAGES C CXX)
+
+if(APPLE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+  set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
+endif()
+
+project(GmSDeNoise VERSION 1.0.0 LANGUAGES C CXX)
+
+# Windows (MSVC): UTF-8 sources, static C runtime (no Visual C++ redistributable
+# needed on the user's PC), symbols kept in the build for crash tracing.
+if(MSVC)
+  add_compile_options(/utf-8 /bigobj)
+  add_compile_definitions(_USE_MATH_DEFINES NOMINMAX _CRT_SECURE_NO_WARNINGS)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  add_compile_options($<$<CONFIG:Release>:/Zi>)
+  add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
+endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-option(ZD_BUILD_PLUGIN "Build the JUCE plugin (VST3, plus AU on macOS)" ON)
+option(ZD_BUILD_PLUGIN "Build the JUCE plugin (VST3)" ON)
 
 # ---- DSP core (framework independent) ---------------------------------
 # RNNoise (BSD-3, vendored; see third_party/rnnoise/README.md)
@@ -42,16 +58,16 @@ if(ZD_BUILD_PLUGIN)
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(JUCE)
 
+  # VST3 on every platform (the user asked for VST3 only on macOS too).
   set(ZD_FORMATS VST3)
-  if(APPLE)
-    list(APPEND ZD_FORMATS AU)
-  endif()
 
-  juce_add_plugin(ZeroDenoisePlugin
-    PRODUCT_NAME "ZeroDenoise"
+  juce_add_plugin(GmSDeNoise
+    PRODUCT_NAME "GmS De-Noise"
     COMPANY_NAME "T2"
-    PLUGIN_MANUFACTURER_CODE Tzdn
-    PLUGIN_CODE Zdn1
+    BUNDLE_ID "com.t2.gmsdenoise"
+    PLUGIN_MANUFACTURER_CODE Utwo
+    PLUGIN_CODE Ugdn
+    DESCRIPTION "Low-latency voice noise reduction"
     FORMATS ${ZD_FORMATS}
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
@@ -61,17 +77,17 @@ if(ZD_BUILD_PLUGIN)
     VST3_CATEGORIES Fx Restoration
     AU_MAIN_TYPE kAudioUnitType_Effect)
 
-  target_sources(ZeroDenoisePlugin PRIVATE
+  target_sources(GmSDeNoise PRIVATE
     plugin/PluginProcessor.cpp
     plugin/PluginEditor.cpp)
 
-  target_compile_definitions(ZeroDenoisePlugin PUBLIC
+  target_compile_definitions(GmSDeNoise PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
-  target_link_libraries(ZeroDenoisePlugin
+  target_link_libraries(GmSDeNoise
     PRIVATE zd_dsp juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
 
@@ -84,6 +100,6 @@ if(ZD_BUILD_PLUGIN)
   # Renders the editor to PNG (links the plugin's shared code)
   juce_add_console_app(zd_ui_snapshot PRODUCT_NAME "zd_ui_snapshot")
   target_sources(zd_ui_snapshot PRIVATE tools/ui_snapshot.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp)
-  target_compile_definitions(zd_ui_snapshot PRIVATE JucePlugin_Name="ZeroDenoise" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+  target_compile_definitions(zd_ui_snapshot PRIVATE JucePlugin_Name="GmS De-Noise" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
   target_link_libraries(zd_ui_snapshot PRIVATE zd_dsp juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
 endif()

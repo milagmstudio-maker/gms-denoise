@@ -22,7 +22,7 @@ int main(int argc, char** argv)
     int fails = 0;
     auto check = [&](bool ok, const juce::String& what) { std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.toRawUTF8()); fails += ok ? 0 : 1; };
 
-    check(inst->getName() == "ZeroDenoise", "name = " + inst->getName());
+    check(inst->getName() == "GmS De-Noise", "name = " + inst->getName());
     inst->setPlayConfigDetails(2, 2, 48000.0, 1024);
     inst->prepareToPlay(48000.0, 1024); // max block; the checks use 37..1024
     check(inst->getLatencySamples() == 0, "reported latency = " + juce::String(inst->getLatencySamples()));

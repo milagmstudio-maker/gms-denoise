@@ -9,6 +9,15 @@
 #define RNN_INLINE inline
 #define OPUS_INLINE inline
 
+/* MSVC has no C99 variable-length arrays: stack arrays via alloca (same lifetime/cost). */
+#ifdef _MSC_VER
+#include <malloc.h>
+#define RNN_STACK_ARRAY(type, name, n) type *name = (type *)_alloca(sizeof(type) * (size_t)(n))
+#else
+#include <alloca.h>
+#define RNN_STACK_ARRAY(type, name, n) type *name = (type *)alloca(sizeof(type) * (size_t)(n))
+#endif
+
 
 /** RNNoise wrapper for malloc(). To do your own dynamic allocation, all you need t
 o do is replace this function and rnnoise_free */

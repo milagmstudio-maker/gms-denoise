@@ -124,7 +124,7 @@ void ZeroDenoiseEditor::paint(juce::Graphics& g)
     g.fillAll(bg);
     g.setColour(juce::Colours::white);
     g.setFont(juce::FontOptions(20.0f, juce::Font::bold));
-    g.drawText("ZeroDenoise", 20, 12, 300, 26, juce::Justification::left);
+    g.drawText("GmS De-Noise", 20, 12, 300, 26, juce::Justification::left);
 
     // gain-reduction display: bars hang down from 0 dB
     g.setColour(panel);

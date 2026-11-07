@@ -1,3 +1,15 @@
+# GmS De-Noise
+
+Low-latency voice noise reduction plug-in (VST3, Windows + macOS), Genomersive Studio.
+Product name "GmS De-Noise", company T2, bundle id com.t2.gmsdenoise, codes Utwo/Ugdn.
+Development history below still uses the working name ZeroDenoise.
+
+Windows and macOS builds: GitHub Actions (`.github/workflows/build.yml`) builds on real
+machines (MSVC x64 static runtime; macOS universal arm64+x86_64, ad-hoc signed), runs the DSP
+tests, `zd_host_check` (loads the VST3 like a DAW) and pluginval at strictness 10, and makes
+an installer plus a manual-install zip (packaging/windows, packaging/macos).
+Local build: `cmake -B build && cmake --build build --config Release --target GmSDeNoise_VST3`.
+
 # ZeroDenoise
 
 Single-knob broadband noise reduction with **zero reported latency**, as a
