@@ -19,7 +19,7 @@ jobs:
         run: cmake -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build
-        run: cmake --build build --config Release --target GmSDeNoise_VST3 zd_host_check zd_tests --parallel
+        run: cmake --build build --config Release --target GmSDeNoise_VST3 zd_host_check zd_glitch_check zd_tests --parallel
 
       - name: DSP unit tests
         run: build\Release\zd_tests.exe
@@ -39,6 +39,12 @@ jobs:
         shell: pwsh
         run: |
           & build\zd_host_check_artefacts\Release\zd_host_check.exe "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Click / glitch stress test (block sizes, automation, mode and gate switching, NaN input)
+        shell: pwsh
+        run: |
+          & build\zd_glitch_check_artefacts\Release\zd_glitch_check.exe "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3"
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: pluginval (strictness 10)
@@ -100,7 +106,7 @@ jobs:
         run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 
       - name: Build
-        run: cmake --build build --config Release --target GmSDeNoise_VST3 zd_host_check zd_tests --parallel
+        run: cmake --build build --config Release --target GmSDeNoise_VST3 zd_host_check zd_glitch_check zd_tests --parallel
 
       - name: DSP unit tests
         run: build/Release/zd_tests
@@ -129,6 +135,11 @@ jobs:
           softwareupdate --install-rosetta --agree-to-license || true
           HC=$(find build -path '*zd_host_check.app/Contents/MacOS/zd_host_check' -o -name zd_host_check -type f -perm +111 | head -1)
           arch -x86_64 "$HC" "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
+
+      - name: Click / glitch stress test
+        run: |
+          GC=$(find build -path '*zd_glitch_check.app/Contents/MacOS/zd_glitch_check' -o -name zd_glitch_check -type f -perm +111 | head -1)
+          "$GC" "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
 
       - name: pluginval (strictness 10)
         run: |

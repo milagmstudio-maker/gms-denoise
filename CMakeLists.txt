@@ -5,7 +5,7 @@ if(APPLE)
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
 endif()
 
-project(GmSDeNoise VERSION 1.0.0 LANGUAGES C CXX)
+project(GmSDeNoise VERSION 1.0.1 LANGUAGES C CXX)
 
 # Windows (MSVC): UTF-8 sources, static C runtime (no Visual C++ redistributable
 # needed on the user's PC), symbols kept in the build for crash tracing.
@@ -96,6 +96,12 @@ if(ZD_BUILD_PLUGIN)
   target_sources(zd_host_check PRIVATE tools/host_check.cpp)
   target_compile_definitions(zd_host_check PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
   target_link_libraries(zd_host_check PRIVATE juce::juce_audio_processors juce::juce_recommended_config_flags)
+
+  # Click / glitch stress test through the VST3 (block sizes, automation, mode/gate switches, extreme input).
+  juce_add_console_app(zd_glitch_check PRODUCT_NAME "zd_glitch_check")
+  target_sources(zd_glitch_check PRIVATE tools/glitch_check.cpp)
+  target_compile_definitions(zd_glitch_check PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+  target_link_libraries(zd_glitch_check PRIVATE juce::juce_audio_processors juce::juce_audio_formats juce::juce_recommended_config_flags)
 
   # Renders the editor to PNG (links the plugin's shared code)
   juce_add_console_app(zd_ui_snapshot PRODUCT_NAME "zd_ui_snapshot")

@@ -164,14 +164,36 @@ void ZeroDenoiser::reset()
     pcEnv = 1.0; pcHoldCnt = 0;
     voiceRefPow.assign(nBins, 0.1);
     gateEnv = 0.0; gateGain = 1.0; gateOpen = true; gateHold = gateHoldLen; gateLevelDb = -120.0f;
+    if (pendingLookahead >= 0) { lookahead = pendingLookahead; pendingLookahead = -1; }
+    xfLen = 256 * scale; // ~5 ms
+    // after audio has played, fade in: the output would otherwise jump from the denoised
+    // signal to the untouched input (fresh filters) in one sample
+    if (freshSinceReset) { xfState = 0; xfGain = 1.0f; } else { xfState = 2; xfGain = 0.0f; xfHold = lookahead; }
+    freshSinceReset = true;
 }
 
 void ZeroDenoiser::setLookahead(int samples)
 {
     samples = std::clamp(samples, 0, maxLookahead);
-    if (samples == lookahead) return;
-    lookahead = samples;
+    if (freshSinceReset) { // nothing played yet: switch at once
+        lookahead = samples; pendingLookahead = -1;
+        for (auto& d : delay) std::fill(d.begin(), d.end(), 0.0f);
+        if (xfState == 2) xfHold = lookahead;
+        return;
+    }
+    if (samples == getLookahead()) return;
+    if (samples == lookahead) { pendingLookahead = -1; if (xfState == 1) xfState = 2; return; } // switched back before it happened
+    pendingLookahead = samples;
+    xfState = 1; // fade out, then switch in process()
+}
+
+void ZeroDenoiser::switchLookaheadNow()
+{
+    lookahead = pendingLookahead; pendingLookahead = -1;
     for (auto& d : delay) std::fill(d.begin(), d.end(), 0.0f);
+    for (auto& h : hist) std::fill(h.begin(), h.end(), 0.0f);
+    xfState = 2;
+    xfHold = lookahead; // the emptied delay line plays silence first: fade in when the audio arrives
 }
 
 void ZeroDenoiser::setParams(const DenoiserParams& p)
@@ -192,7 +214,12 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
     const bool gateOn = params.gateDb > DenoiserParams::kGateOff;
     const double thrOpen = std::pow(10.0, params.gateDb / 10.0);        // power
     const double thrClose = std::pow(10.0, (params.gateDb - 3.0) / 10.0); // 3 dB hysteresis
+    if (numSamples > 0) freshSinceReset = false;
+    const float xfStep = 1.0f / (float) xfLen;
     for (int n = 0; n < numSamples; ++n) {
+        // a NaN / Inf from the host (or an upstream plug-in) would otherwise poison the
+        // noise estimate for good: treat it as silence
+        for (int c = 0; c < nc; ++c) if (!(std::fabs(ch[c][n]) <= 1.0e6f)) ch[c][n] = 0.0f;
         float mono = 0.0f;
         double pw = 0.0;
         if (!gateDetectOutput) for (int c = 0; c < nc; ++c) pw = std::max(pw, (double) ch[c][n] * ch[c][n]);
@@ -236,7 +263,19 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
                                 : (gateGain * gateCloseC < 1e-6 ? 0.0 : gateGain * gateCloseC);
             for (int c = 0; c < nc; ++c) ch[c][n] *= (float) gateGain;
         } else {
-            gateOpen = true; gateGain = 1.0; gateHold = gateHoldLen;
+            gateOpen = true; gateHold = gateHoldLen;
+            if (gateGain < 1.0) { // gate switched off while closed: ramp up, don't jump
+                gateGain = gateOpenC * gateGain + (1.0 - gateOpenC);
+                if (gateGain > 0.9999) gateGain = 1.0;
+                for (int c = 0; c < nc; ++c) ch[c][n] *= (float) gateGain;
+            }
+        }
+        if (xfState != 0) {
+            if (xfState == 1) { xfGain -= xfStep; if (xfGain <= 0.0f) { xfGain = 0.0f; switchLookaheadNow(); } }
+            else if (xfHold > 0) --xfHold;
+            else { xfGain += xfStep; if (xfGain >= 1.0f) { xfGain = 1.0f; xfState = 0; } }
+            const float g = xfGain * xfGain * (3.0f - 2.0f * xfGain); // smoothstep
+            for (int c = 0; c < nc; ++c) ch[c][n] *= g;
         }
 
         if (++hopCount == hop) {

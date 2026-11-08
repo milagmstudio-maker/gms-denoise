@@ -53,7 +53,7 @@ public:
     // runs on the undelayed input, so gains are decided with that much "future".
     // 0 = true zero latency. Reported plugin latency must equal this value.
     void setLookahead(int samples);
-    int getLookahead() const { return lookahead; }
+    int getLookahead() const { return pendingLookahead >= 0 ? pendingLookahead : lookahead; }
     const DenoiserParams& getParams() const { return params; }
 
     // In-place processing of non-interleaved channels. Any block size.
@@ -81,6 +81,7 @@ private:
     void analyse();          // runs once per hop, designs nextFilter
     void designMinPhase(const float* gain, float* hOut);
     void analyseAi();        // AI mode: filter from the latest network gains
+    void switchLookaheadNow();
     void computeDspGain(float* out); // DSP estimator, one hop
     void updateFloor();              // minimum-statistics noise floor (voice guard reference)
     double computeVoicing();         // 0..1 periodicity of the above-noise signal (300 Hz-5 kHz, f0 100-1600 Hz)
@@ -105,6 +106,9 @@ private:
     std::vector<std::vector<float>> hist; int histPos = 0;
     int hopCount = 0;
     int lookahead = 0;
+    // click-free switching: a lookahead change while audio runs fades the output out,
+    // switches (fresh delay + FIR history) and fades back in; reset() also fades in.
+    int pendingLookahead = -1, xfLen = 256, xfState = 0, xfHold = 0; float xfGain = 1.0f; bool freshSinceReset = true;
     std::vector<std::vector<float>> delay; int delayPos = 0;
 
     // filters (stored time-reversed for direct dot products)
