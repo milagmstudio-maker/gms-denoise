@@ -1,5 +1,7 @@
 GmS De-Noise（macOS / VST3 / Apple Silicon・Intel 両対応）
-Genomersive Studio
+GmS Audio（Genomersive Studio のオーディオブランド）
+
+DAW のプラグイン一覧では、メーカー名は「GmS Audio」と表示されます（以前の版は「T2」）。内部のプラグインIDは変えていないので、保存済みのプロジェクトはそのまま開けます。
 
 ■ 入れ方（どちらか一方）
 

@@ -1,7 +1,7 @@
 # GmS De-Noise
 
 Low-latency voice noise reduction plug-in (VST3, Windows + macOS), Genomersive Studio.
-Product name "GmS De-Noise", company T2, bundle id com.t2.gmsdenoise, codes Utwo/Ugdn.
+Product name "GmS De-Noise", company "GmS Audio" (was T2; GmS Audio is Genomersive Studio's audio brand), bundle id com.t2.gmsdenoise, codes Utwo/Ugdn.
 Development history below still uses the working name ZeroDenoise.
 
 Windows and macOS builds: GitHub Actions (`.github/workflows/build.yml`) builds on real
