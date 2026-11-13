@@ -63,7 +63,7 @@ if(ZD_BUILD_PLUGIN)
 
   juce_add_plugin(GmSDeNoise
     PRODUCT_NAME "GmS De-Noise"
-    COMPANY_NAME "T2"
+    COMPANY_NAME "GmS Audio"
     BUNDLE_ID "com.t2.gmsdenoise"
     PLUGIN_MANUFACTURER_CODE Utwo
     PLUGIN_CODE Ugdn
