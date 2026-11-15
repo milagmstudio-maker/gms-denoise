@@ -1,4 +1,5 @@
 #include "ZeroDenoiser.h"
+#include <cstring>
 #include <algorithm>
 #include <cmath>
 
@@ -20,6 +21,7 @@ inline float dot(const float* a, const float* b, int n)
     for (; i < n; ++i) s0 += a[i] * b[i];
     return ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
 }
+
 } // namespace
 
 void ZeroDenoiser::prepare(double sampleRate, int numChannels)
@@ -209,7 +211,29 @@ void ZeroDenoiser::setParams(const DenoiserParams& p)
 
 void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
 {
-    const int nc = std::min(numChannels, nCh);
+    int nc = std::min(numChannels, nCh);
+    // A mono source on two channels (a microphone in a stereo route): both
+    // channels carry the same samples, so the second would get the same result.
+    // Then only the first is filtered and copied (bit-exact, half the work).
+    // `linked` = channel 1's history and delay line equal channel 0's (they are
+    // not written while linked; copied over the moment the channels differ).
+    bool mirrored = false;
+    if (nc == 2 && numSamples > 0) {
+        const bool same = std::memcmp(ch[0], ch[1], sizeof(float) * (size_t) numSamples) == 0;
+        if (same && !linked) {
+            // Back in step? (e.g. after a short stereo passage)
+            bool equal = hist[0] == hist[1];
+            if (equal && lookahead > 0 && delay.size() >= 2) equal = delay[0] == delay[1];
+            linked = equal;
+        }
+        if (!same && linked) {
+            hist[1] = hist[0];
+            if (delay.size() >= 2) delay[1] = delay[0];
+            linked = false;
+        }
+        mirrored = same && linked;
+    }
+    if (mirrored) nc = 1;
     const float invC = 1.0f / (float) std::max(1, nc);
     const bool gateOn = params.gateDb > DenoiserParams::kGateOff;
     const double thrOpen = std::pow(10.0, params.gateDb / 10.0);        // power
@@ -284,6 +308,7 @@ void ZeroDenoiser::process(float* const* ch, int numChannels, int numSamples)
             if (aiActive) analyseAi(); else analyse();
         }
     }
+    if (mirrored) std::memcpy(ch[1], ch[0], sizeof(float) * (size_t) numSamples);
 }
 
 void ZeroDenoiser::analyse()

@@ -104,6 +104,7 @@ private:
     std::vector<float> anaBuf; int anaPos = 0;
     // per-channel FIR history, doubled ring for contiguous reads
     std::vector<std::vector<float>> hist; int histPos = 0;
+    bool linked = true;   // channel 1's history / delay equal channel 0's (see process)
     int hopCount = 0;
     int lookahead = 0;
     // click-free switching: a lookahead change while audio runs fades the output out,

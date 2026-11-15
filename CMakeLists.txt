@@ -5,7 +5,7 @@ if(APPLE)
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
 endif()
 
-project(GmSDeNoise VERSION 1.0.1 LANGUAGES C CXX)
+project(GmSDeNoise VERSION 1.0.2 LANGUAGES C CXX)
 
 # Windows (MSVC): UTF-8 sources, static C runtime (no Visual C++ redistributable
 # needed on the user's PC), symbols kept in the build for crash tracing.
