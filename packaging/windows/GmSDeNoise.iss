@@ -37,6 +37,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{commoncf64}\VST3\GmS De-Noise.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README_ja.txt"; DestDir: "{commoncf64}\VST3\GmS De-Noise.vst3"; DestName: "GmS De-Noise README_ja.txt"; Flags: ignoreversion
+Source: "..\ThirdPartyNotices.txt"; DestDir: "{commoncf64}\VST3\GmS De-Noise.vst3"; DestName: "GmS De-Noise ThirdPartyNotices.txt"; Flags: ignoreversion
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commoncf64}\VST3\GmS De-Noise.vst3"

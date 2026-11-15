@@ -89,7 +89,7 @@ jobs:
         run: |
           New-Item -ItemType Directory "zip\GmS De-Noise" | Out-Null
           Copy-Item -Recurse "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3" "zip\GmS De-Noise\"
-          Copy-Item packaging\windows\install.bat, packaging\windows\uninstall.bat, packaging\windows\README_ja.txt "zip\GmS De-Noise\"
+          Copy-Item packaging\windows\install.bat, packaging\windows\uninstall.bat, packaging\windows\README_ja.txt, packaging\ThirdPartyNotices.txt "zip\GmS De-Noise\"
           Compress-Archive -Path "zip\GmS De-Noise" -DestinationPath "dist\GmS-De-Noise-$env:VERSION-Windows-VST3.zip"
 
       - uses: actions/upload-artifact@v4
@@ -157,8 +157,10 @@ jobs:
           mkdir -p "zip/GmS De-Noise"
           cp -R "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3" "zip/GmS De-Noise/"
           cp packaging/macos/README_ja.txt "zip/GmS De-Noise/"
+          cp packaging/ThirdPartyNotices.txt "zip/GmS De-Noise/"
           (cd zip && ditto -c -k --keepParent "GmS De-Noise" "../dist/GmS-De-Noise-$VERSION-macOS-VST3.zip")
           cp packaging/macos/README_ja.txt dist/README_ja_macOS.txt
+          cp packaging/ThirdPartyNotices.txt dist/ThirdPartyNotices.txt
 
       - name: Install check with the .pkg
         run: |
