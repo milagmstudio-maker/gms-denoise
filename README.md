@@ -65,8 +65,10 @@ Xinerama, Xcursor, Xcomposite, Freetype, Fontconfig, GL dev packages).
 
 - The Python and C++ implementations match to about -129 dB.
 - `zd_host_check` loads the built VST3 through JUCE hosting and checks latency 0, parameters, processing and state.
-- CPU: about 4 % of one core per channel in the test container (naive FFT, no
-  explicit SIMD).
+- CPU: about 4 % of one core per channel in the test container with the original
+  radix-2 FFT; since 1.0.3 the analysis FFTs use pffft (SIMD; 43 % fewer
+  instructions in total, output the same to -124 dB), and since 1.0.2 a mono
+  source on two channels is filtered once (bit-exact).
 - All sizes scale by 2 at 88.2/96 kHz and by 4 at 176.4/192 kHz, so time and frequency resolution (about 47 Hz/bin) stay the same. CPU at 96 kHz is about 9 % of one core per channel.
 - Learn: while on, the input is averaged as pure noise. With Adaptive off, the learned profile stays frozen. With it on, tracking continues from the learned profile.
 - Versus the 21 ms STFT reference (5 dB SNR): noise in pauses is reduced as much or more, but speech onsets lose 2 to 4 dB more and STOI is 0.02 to 0.04 lower. See `prototype/results_v3.txt`.
