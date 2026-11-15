@@ -1,27 +1,27 @@
-GmS De-Noise（macOS / VST3 / Apple Silicon・Intel 両対応）
+しずまる（Shizumaru）— 遅れゼロのノイズ除去（macOS / VST3 / Apple Silicon・Intel 両対応・無料）
 GmS Audio（Genomersive Studio のオーディオブランド）
 
-DAW のプラグイン一覧では、メーカー名は「GmS Audio」と表示されます（以前の版は「T2」）。内部のプラグインIDは変えていないので、保存済みのプロジェクトはそのまま開けます。
+しずまるは、以前「GmS De-Noise」という名前だったプラグインです（無料）。名前が変わっても中身は同じで、内部のプラグインIDも同じなので、GmS De-Noise を使っていた DAW のプロジェクトはそのまま開けます。pkg のインストーラーは古い GmS De-Noise.vst3 を自動で消します（同じプラグインが2つ並ぶのを防ぐため）。DAW の一覧には「Shizumaru」（メーカー名 GmS Audio）と出ます（DAW によっては日本語の名前が文字化けするため、DAW に見せる名前は英字にしています）。
 
 ■ 入れ方（どちらか一方）
 
-1. GmS-De-Noise-x.x.x-macOS.pkg を開く（おすすめ）
+1. Shizumaru-x.x.x-macOS.pkg を開く（おすすめ）
    - 署名（Apple の有料の開発者登録）をしていないので、ダブルクリックすると
      「開けません」と出ます。ウイルスの警告ではありません。次のどちらかで開けます。
        a. Finder で pkg を右クリック（control+クリック）→「開く」→「開く」
        b. それでも開けないときは「システム設定」→「プライバシーとセキュリティ」を下まで見て、
           「このまま開く」を押す
-   - /Library/Audio/Plug-Ins/VST3/GmS De-Noise.vst3 に入ります。
+   - /Library/Audio/Plug-Ins/VST3/Shizumaru.vst3 に入ります。
 
-2. zip を展開して、GmS De-Noise.vst3 を自分で入れる
-   - 「GmS De-Noise.vst3」を /Library/Audio/Plug-Ins/VST3（全ユーザー）か
+2. zip を展開して、Shizumaru.vst3 を自分で入れる
+   - 「Shizumaru.vst3」を /Library/Audio/Plug-Ins/VST3（全ユーザー）か
      ~/Library/Audio/Plug-Ins/VST3（自分だけ）にコピーします。
    - ダウンロードした印が残っていると DAW が読み込めないので、ターミナルで次を実行してください。
-       xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"GmS De-Noise.vst3"
+       xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Shizumaru.vst3"
      （/Library に入れた場合は sudo を付けて、そのパスにしてください）
 
 ■ 消し方
-  /Library/Audio/Plug-Ins/VST3/GmS De-Noise.vst3 をゴミ箱に入れてください。
+  /Library/Audio/Plug-Ins/VST3/Shizumaru.vst3 をゴミ箱に入れてください。
 
 入れたら、DAW を開き直してプラグインを再スキャンしてください。
   Logic Pro は VST3 を読み込めません（AU 専用）。REAPER / Cubase / Studio One / Ableton Live などで使えます。

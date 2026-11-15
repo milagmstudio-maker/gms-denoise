@@ -1,4 +1,4 @@
-GmS De-Noise (GmS Audio / Genomersive Studio) — third-party notices
+しずまる / Shizumaru (formerly GmS De-Noise; GmS Audio / Genomersive Studio) — third-party notices
 
 
 Noise reduction network: RNNoise

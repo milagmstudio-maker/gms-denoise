@@ -1,7 +1,9 @@
-# GmS De-Noise
+# しずまる (Shizumaru) — formerly GmS De-Noise
+
+Free, zero-latency voice noise reduction (VST3, Windows + macOS). Renamed from GmS De-Noise in 1.1.0: shown in hosts as "Shizumaru" (a Japanese name is garbled in the VST3 class info and broke loading), 「しずまる」 in its window, installers and docs, file Shizumaru.vst3, plug-in codes unchanged (Utwo / Ugdn), so projects made with GmS De-Noise load it. The installers remove an old GmS De-Noise.vst3.
 
 Low-latency voice noise reduction plug-in (VST3, Windows + macOS), Genomersive Studio.
-Product name "GmS De-Noise", company "GmS Audio" (was T2; GmS Audio is Genomersive Studio's audio brand), bundle id com.t2.gmsdenoise, codes Utwo/Ugdn.
+Product and plug-in name "Shizumaru" (しずまる), company "GmS Audio" (was T2; GmS Audio is Genomersive Studio's audio brand), bundle id com.t2.gmsdenoise, codes Utwo/Ugdn.
 Development history below still uses the working name ZeroDenoise.
 
 Windows and macOS builds: GitHub Actions (`.github/workflows/build.yml`) builds on real

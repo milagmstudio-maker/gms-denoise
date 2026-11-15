@@ -1,0 +1,5 @@
+#!/bin/bash
+# The plug-in's old name (GmS De-Noise) is the same plug-in: remove it so
+# hosts do not see two copies with one ID.
+rm -rf "/Library/Audio/Plug-Ins/VST3/GmS De-Noise.vst3"
+exit 0

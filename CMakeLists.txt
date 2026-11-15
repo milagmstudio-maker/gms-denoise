@@ -5,7 +5,7 @@ if(APPLE)
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
 endif()
 
-project(GmSDeNoise VERSION 1.0.3 LANGUAGES C CXX)
+project(GmSDeNoise VERSION 1.1.0 LANGUAGES C CXX)
 
 # Windows (MSVC): UTF-8 sources, static C runtime (no Visual C++ redistributable
 # needed on the user's PC), symbols kept in the build for crash tracing.
@@ -77,12 +77,17 @@ if(ZD_BUILD_PLUGIN)
   set(ZD_FORMATS VST3)
 
   juce_add_plugin(GmSDeNoise
-    PRODUCT_NAME "GmS De-Noise"
+    # しずまる (formerly GmS De-Noise). Hosts see "Shizumaru": a Japanese plug-in
+    # name is garbled in the VST3 class info (and the plug-in then fails to load
+    # in some hosts), so the name hosts see is ASCII; しずまる is used in the
+    # plug-in's own window, the installers and the docs. The codes stay, so
+    # projects made with GmS De-Noise load it.
+    PRODUCT_NAME "Shizumaru"
     COMPANY_NAME "GmS Audio"
     BUNDLE_ID "com.t2.gmsdenoise"
     PLUGIN_MANUFACTURER_CODE Utwo
     PLUGIN_CODE Ugdn
-    DESCRIPTION "Low-latency voice noise reduction"
+    DESCRIPTION "Zero-latency voice noise reduction"
     FORMATS ${ZD_FORMATS}
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
@@ -121,6 +126,6 @@ if(ZD_BUILD_PLUGIN)
   # Renders the editor to PNG (links the plugin's shared code)
   juce_add_console_app(zd_ui_snapshot PRODUCT_NAME "zd_ui_snapshot")
   target_sources(zd_ui_snapshot PRIVATE tools/ui_snapshot.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp)
-  target_compile_definitions(zd_ui_snapshot PRIVATE JucePlugin_Name="GmS De-Noise" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+  target_compile_definitions(zd_ui_snapshot PRIVATE JucePlugin_Name="Shizumaru" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
   target_link_libraries(zd_ui_snapshot PRIVATE zd_dsp juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
 endif()

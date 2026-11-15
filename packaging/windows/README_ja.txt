@@ -1,16 +1,16 @@
-﻿GmS De-Noise（Windows / VST3 / 64bit）
+﻿しずまる（Shizumaru）— 遅れゼロのノイズ除去（Windows / VST3 / 64bit・無料）
 GmS Audio（Genomersive Studio のオーディオブランド）
 
-DAW のプラグイン一覧では、メーカー名は「GmS Audio」と表示されます（以前の版は「T2」）。内部のプラグインIDは変えていないので、保存済みのプロジェクトはそのまま開けます。
+しずまるは、以前「GmS De-Noise」という名前だったプラグインです（無料）。名前が変わっても中身は同じで、内部のプラグインIDも同じなので、GmS De-Noise を使っていた DAW のプロジェクトはそのまま開けます。インストーラーは古い GmS De-Noise.vst3 を自動で消します（同じプラグインが2つ並ぶのを防ぐため）。DAW の一覧には「Shizumaru」（メーカー名 GmS Audio）と出ます（DAW によっては日本語の名前が文字化けするため、DAW に見せる名前は英字にしています）。
 
 ■ 入れ方（どちらか一方）
 
-1. GmS-De-Noise-x.x.x-Windows-Setup.exe を実行する（おすすめ）
+1. Shizumaru-x.x.x-Windows-Setup.exe を実行する（おすすめ）
    - 「WindowsによってPCが保護されました」と出たら、「詳細情報」→「実行」を押してください。
      署名（有料の証明書）をしていないので出る表示で、ウイルスの警告ではありません。
    - 「このアプリがデバイスに変更を加えることを許可しますか？」には「はい」。
-   - C:\Program Files\Common Files\VST3\GmS De-Noise.vst3 に入ります。
-   - 消すときは「設定」→「アプリ」→「GmS De-Noise (VST3)」→「アンインストール」。
+   - C:\Program Files\Common Files\VST3\Shizumaru.vst3 に入ります。
+   - 消すときは「設定」→「アプリ」→「Shizumaru (VST3)」→「アンインストール」。
 
 2. zip を全部展開して install.bat を実行する（Setup.exe が使えないとき）
    - 展開せずに zip の中から実行すると失敗します。必ず先に展開してください。
@@ -26,7 +26,7 @@ DAW のプラグイン一覧では、メーカー名は「GmS Audio」と表示�
   - Visual C++ ランタイムなどの追加インストールは不要です。
 
 ■ OBS で使うとき
-  OBS に最初から入っている「VST 2.x プラグイン」フィルターは VST2 専用なので、VST3 の GmS De-Noise は出てきません。
+  OBS に最初から入っている「VST 2.x プラグイン」フィルターは VST2 専用なので、VST3 のしずまるは出てきません。
   OBS 用の VST3 ホストプラグインを使うか、DAW を通して仮想オーディオケーブルで OBS に戻してください。
 
 ■ 使い方

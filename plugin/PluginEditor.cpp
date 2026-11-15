@@ -2,7 +2,7 @@
 
 namespace {
 constexpr int kWidth = 640, kHeight = 630;
-const juce::String kModel = "De-Noise";
+const juce::String kModel = "SHIZUMARU";   // しずまる (the panel font is Latin only)
 
 // The editor's own settings (the panel colour and the unit's serial number).
 juce::PropertiesFile& uiSettings()

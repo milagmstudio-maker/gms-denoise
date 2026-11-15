@@ -1,6 +1,6 @@
 name: Build (Windows + macOS)
 
-# Builds the GmS De-Noise VST3 on real Windows and macOS machines, tests it the
+# Builds the しずまる (Shizumaru, formerly GmS De-Noise) VST3 on real Windows and macOS machines, tests it the
 # way a DAW loads it (zd_host_check: latency per mode, noise reduction at many
 # block sizes and sample rates, state restore) and with pluginval at strictness
 # 10, then packages an installer plus a manual-install zip per platform.
@@ -27,7 +27,7 @@ jobs:
       - name: No extra runtime needed (only Windows system DLLs)
         shell: pwsh
         run: |
-          $dll = Get-ChildItem "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3" -Recurse -Filter "GmS De-Noise.vst3" -File | Select-Object -First 1
+          $dll = Get-ChildItem "build\GmSDeNoise_artefacts\Release\VST3\Shizumaru.vst3" -Recurse -Filter "Shizumaru.vst3" -File | Select-Object -First 1
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
           $deps = & $dumpbin.FullName /dependents $dll.FullName | Select-String '\.dll' | ForEach-Object { $_.ToString().Trim() }
@@ -38,13 +38,13 @@ jobs:
       - name: Host check (loads the VST3 like a DAW)
         shell: pwsh
         run: |
-          & build\zd_host_check_artefacts\Release\zd_host_check.exe "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3"
+          & build\zd_host_check_artefacts\Release\zd_host_check.exe "build\GmSDeNoise_artefacts\Release\VST3\Shizumaru.vst3"
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Click / glitch stress test (block sizes, automation, mode and gate switching, NaN input)
         shell: pwsh
         run: |
-          & build\zd_glitch_check_artefacts\Release\zd_glitch_check.exe "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3"
+          & build\zd_glitch_check_artefacts\Release\zd_glitch_check.exe "build\GmSDeNoise_artefacts\Release\VST3\Shizumaru.vst3"
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: pluginval (strictness 10)
@@ -52,7 +52,7 @@ jobs:
         run: |
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
           Expand-Archive pluginval.zip -DestinationPath pluginval
-          $p = Start-Process -FilePath pluginval\pluginval.exe -ArgumentList '--strictness-level 10 --validate-in-process --timeout-ms 600000 --output-dir pv-log "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3"' -Wait -PassThru -NoNewWindow
+          $p = Start-Process -FilePath pluginval\pluginval.exe -ArgumentList '--strictness-level 10 --validate-in-process --timeout-ms 600000 --output-dir pv-log "build\GmSDeNoise_artefacts\Release\VST3\Shizumaru.vst3"' -Wait -PassThru -NoNewWindow
           Get-ChildItem pv-log -ErrorAction SilentlyContinue | Get-Content | Select-Object -Last 40
           if ($p.ExitCode -ne 0) { Write-Error "pluginval failed ($($p.ExitCode))"; exit 1 }
 
@@ -62,7 +62,7 @@ jobs:
           $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
           if (-not $iscc) { choco install innosetup -y --no-progress; $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(GmSDeNoise VERSION ([0-9.]+)').Matches[0].Groups[1].Value
-          $bundle = (Resolve-Path "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3").Path
+          $bundle = (Resolve-Path "build\GmSDeNoise_artefacts\Release\VST3\Shizumaru.vst3").Path
           & $iscc.FullName "/DAppVersion=$version" "/DBundleDir=$bundle" /Odist packaging\windows\GmSDeNoise.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -72,11 +72,11 @@ jobs:
         run: |
           $setup = Get-ChildItem dist\*.exe | Select-Object -First 1
           Start-Process $setup.FullName -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
-          $installed = "$env:CommonProgramW6432\VST3\GmS De-Noise.vst3"
+          $installed = "$env:CommonProgramW6432\VST3\Shizumaru.vst3"
           if (-not (Test-Path $installed)) { Write-Error "not installed at $installed"; exit 1 }
           & build\zd_host_check_artefacts\Release\zd_host_check.exe $installed
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          $uninstaller = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object { $_.DisplayName -eq 'GmS De-Noise (VST3)' } | Select-Object -First 1
+          $uninstaller = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object { $_.DisplayName -eq 'Shizumaru (VST3)' } | Select-Object -First 1
           if (-not $uninstaller) { Write-Error "no uninstall entry"; exit 1 }
           $exe = $uninstaller.UninstallString.Trim('"')
           Start-Process $exe -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
@@ -87,14 +87,14 @@ jobs:
       - name: Manual-install zip
         shell: pwsh
         run: |
-          New-Item -ItemType Directory "zip\GmS De-Noise" | Out-Null
-          Copy-Item -Recurse "build\GmSDeNoise_artefacts\Release\VST3\GmS De-Noise.vst3" "zip\GmS De-Noise\"
-          Copy-Item packaging\windows\install.bat, packaging\windows\uninstall.bat, packaging\windows\README_ja.txt, packaging\ThirdPartyNotices.txt "zip\GmS De-Noise\"
-          Compress-Archive -Path "zip\GmS De-Noise" -DestinationPath "dist\GmS-De-Noise-$env:VERSION-Windows-VST3.zip"
+          New-Item -ItemType Directory "zip\Shizumaru" | Out-Null
+          Copy-Item -Recurse "build\GmSDeNoise_artefacts\Release\VST3\Shizumaru.vst3" "zip\Shizumaru\"
+          Copy-Item packaging\windows\install.bat, packaging\windows\uninstall.bat, packaging\windows\README_ja.txt, packaging\ThirdPartyNotices.txt "zip\Shizumaru\"
+          Compress-Archive -Path "zip\Shizumaru" -DestinationPath "dist\Shizumaru-$env:VERSION-Windows-VST3.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: GmS-De-Noise-Windows
+          name: Shizumaru-Windows
           path: dist/*
 
   macos:
@@ -113,7 +113,7 @@ jobs:
 
       - name: Universal binary check
         run: |
-          BIN="build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3/Contents/MacOS/GmS De-Noise"
+          BIN="build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3/Contents/MacOS/Shizumaru"
           lipo -info "$BIN"
           lipo -info "$BIN" | grep -q arm64
           lipo -info "$BIN" | grep -q x86_64
@@ -121,56 +121,56 @@ jobs:
 
       - name: Ad-hoc code signature (needed to load on Apple Silicon)
         run: |
-          codesign --force --deep --sign - "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
-          codesign --verify --deep --strict --verbose=2 "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
+          codesign --force --deep --sign - "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3"
+          codesign --verify --deep --strict --verbose=2 "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3"
 
       - name: Host check (arm64, loads the VST3 like a DAW)
         run: |
           HC=$(find build -path '*zd_host_check.app/Contents/MacOS/zd_host_check' -o -name zd_host_check -type f -perm +111 | head -1)
           echo "$HC"
-          "$HC" "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
+          "$HC" "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3"
 
       - name: Host check (x86_64 under Rosetta)
         run: |
           softwareupdate --install-rosetta --agree-to-license || true
           HC=$(find build -path '*zd_host_check.app/Contents/MacOS/zd_host_check' -o -name zd_host_check -type f -perm +111 | head -1)
-          arch -x86_64 "$HC" "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
+          arch -x86_64 "$HC" "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3"
 
       - name: Click / glitch stress test
         run: |
           GC=$(find build -path '*zd_glitch_check.app/Contents/MacOS/zd_glitch_check' -o -name zd_glitch_check -type f -perm +111 | head -1)
-          "$GC" "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
+          "$GC" "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3"
 
       - name: pluginval (strictness 10)
         run: |
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
           unzip -q pluginval.zip -d pluginval
-          pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --timeout-ms 600000 "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3"
+          pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --timeout-ms 600000 "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3"
 
       - name: Package (.pkg installer + zip)
         run: |
           VERSION=$(sed -n 's/^project(GmSDeNoise VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           mkdir -p dist pkgroot/Library/Audio/Plug-Ins/VST3
-          cp -R "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3" pkgroot/Library/Audio/Plug-Ins/VST3/
-          pkgbuild --root pkgroot --identifier com.t2.gmsdenoise.vst3 --version "$VERSION" --install-location / "dist/GmS-De-Noise-$VERSION-macOS.pkg"
-          mkdir -p "zip/GmS De-Noise"
-          cp -R "build/GmSDeNoise_artefacts/Release/VST3/GmS De-Noise.vst3" "zip/GmS De-Noise/"
-          cp packaging/macos/README_ja.txt "zip/GmS De-Noise/"
-          cp packaging/ThirdPartyNotices.txt "zip/GmS De-Noise/"
-          (cd zip && ditto -c -k --keepParent "GmS De-Noise" "../dist/GmS-De-Noise-$VERSION-macOS-VST3.zip")
+          cp -R "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3" pkgroot/Library/Audio/Plug-Ins/VST3/
+          pkgbuild --root pkgroot --scripts packaging/macos/scripts --identifier com.t2.gmsdenoise.vst3 --version "$VERSION" --install-location / "dist/Shizumaru-$VERSION-macOS.pkg"
+          mkdir -p "zip/Shizumaru"
+          cp -R "build/GmSDeNoise_artefacts/Release/VST3/Shizumaru.vst3" "zip/Shizumaru/"
+          cp packaging/macos/README_ja.txt "zip/Shizumaru/"
+          cp packaging/ThirdPartyNotices.txt "zip/Shizumaru/"
+          (cd zip && ditto -c -k --keepParent "Shizumaru" "../dist/Shizumaru-$VERSION-macOS-VST3.zip")
           cp packaging/macos/README_ja.txt dist/README_ja_macOS.txt
           cp packaging/ThirdPartyNotices.txt dist/ThirdPartyNotices.txt
 
       - name: Install check with the .pkg
         run: |
-          sudo installer -pkg dist/GmS-De-Noise-*-macOS.pkg -target /
-          test -d "/Library/Audio/Plug-Ins/VST3/GmS De-Noise.vst3"
+          sudo installer -pkg dist/Shizumaru-*-macOS.pkg -target /
+          test -d "/Library/Audio/Plug-Ins/VST3/Shizumaru.vst3"
           HC=$(find build -path '*zd_host_check.app/Contents/MacOS/zd_host_check' -o -name zd_host_check -type f -perm +111 | head -1)
-          "$HC" "/Library/Audio/Plug-Ins/VST3/GmS De-Noise.vst3"
+          "$HC" "/Library/Audio/Plug-Ins/VST3/Shizumaru.vst3"
           echo "install OK"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: GmS-De-Noise-macOS
+          name: Shizumaru-macOS
           path: dist/*
