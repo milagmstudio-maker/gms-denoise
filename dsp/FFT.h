@@ -8,6 +8,12 @@
 #include <cmath>
 #include <complex>
 #include <vector>
+#ifndef ZD_USE_PFFFT
+ #define ZD_USE_PFFFT 0
+#endif
+#if ZD_USE_PFFFT
+ #include "pffft.h"
+#endif
 
 namespace zd {
 
@@ -16,9 +22,23 @@ public:
     using cpx = std::complex<float>;
 
     explicit FFT(int size = 0) { if (size > 0) prepare(size); }
+    FFT(const FFT&) = delete;
+    FFT& operator=(const FFT&) = delete;
+   #if ZD_USE_PFFFT
+    // pffft (SIMD, several times faster than the radix-2 code below): the same
+    // transform; results differ from it only by float rounding.
+    ~FFT() { freePffft(); }
+   #endif
 
     void prepare(int size)
     {
+       #if ZD_USE_PFFFT
+        freePffft();
+        setup = pffft_new_setup(size, PFFFT_REAL);
+        pa = static_cast<float*>(pffft_aligned_malloc(sizeof(float) * (size_t) size));
+        pb = static_cast<float*>(pffft_aligned_malloc(sizeof(float) * (size_t) size));
+        pw = static_cast<float*>(pffft_aligned_malloc(sizeof(float) * (size_t) size));
+       #endif
         n = size;
         h = n / 2;
         bitrev.assign((size_t) h, 0);
@@ -53,6 +73,16 @@ public:
     // in: n real samples. out: n/2+1 complex bins (unnormalised).
     void forwardReal(const float* in, cpx* out)
     {
+       #if ZD_USE_PFFFT
+        if (setup != nullptr) {
+            for (int i = 0; i < n; ++i) pa[i] = in[i];
+            pffft_transform_ordered(setup, pa, pb, pw, PFFFT_FORWARD);
+            out[0] = cpx(pb[0], 0.0f);
+            out[h] = cpx(pb[1], 0.0f);
+            for (int k = 1; k < h; ++k) out[k] = cpx(pb[2 * k], pb[2 * k + 1]);
+            return;
+        }
+       #endif
         for (int i = 0; i < h; ++i) {
             const int r = bitrev[(size_t) i];
             wr[(size_t) r] = in[2 * i];
@@ -76,6 +106,17 @@ public:
     // in: n/2+1 complex bins. out: n real samples, scaled by 1/n (true inverse).
     void inverseReal(const cpx* in, float* out)
     {
+       #if ZD_USE_PFFFT
+        if (setup != nullptr) {
+            pa[0] = in[0].real();
+            pa[1] = in[h].real();
+            for (int k = 1; k < h; ++k) { pa[2 * k] = in[k].real(); pa[2 * k + 1] = in[k].imag(); }
+            pffft_transform_ordered(setup, pa, pb, pw, PFFFT_BACKWARD);
+            const float s = 1.0f / (float) n;
+            for (int i = 0; i < n; ++i) out[i] = pb[i] * s;
+            return;
+        }
+       #endif
         for (int k = 0; k < h; ++k) {
             const float ar = in[k].real(), ai = in[k].imag();
             const float br = in[h - k].real(), bi = -in[h - k].imag();
@@ -124,6 +165,18 @@ private:
         }
     }
 
+   #if ZD_USE_PFFFT
+    void freePffft()
+    {
+        if (setup != nullptr) pffft_destroy_setup(setup);
+        if (pa != nullptr) pffft_aligned_free(pa);
+        if (pb != nullptr) pffft_aligned_free(pb);
+        if (pw != nullptr) pffft_aligned_free(pw);
+        setup = nullptr; pa = pb = pw = nullptr;
+    }
+    PFFFT_Setup* setup = nullptr;
+    float *pa = nullptr, *pb = nullptr, *pw = nullptr;
+   #endif
     int n = 0, h = 0;
     std::vector<int> bitrev;
     std::vector<float> twr, twi, rr, ri, wr, wi;

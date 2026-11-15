@@ -5,7 +5,7 @@ if(APPLE)
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
 endif()
 
-project(GmSDeNoise VERSION 1.0.2 LANGUAGES C CXX)
+project(GmSDeNoise VERSION 1.0.3 LANGUAGES C CXX)
 
 # Windows (MSVC): UTF-8 sources, static C runtime (no Visual C++ redistributable
 # needed on the user's PC), symbols kept in the build for crash tracing.
@@ -35,9 +35,24 @@ if(NOT MSVC)
   target_link_libraries(zd_rnnoise PUBLIC m)
 endif()
 
+# pffft for the analysis FFTs (BSD-like, vendored; ZD_USE_PFFFT=0 keeps the
+# built-in radix-2 FFT of dsp/FFT.h).
+option(ZD_USE_PFFFT "Use pffft for the analysis FFTs" ON)
 add_library(zd_dsp STATIC dsp/ZeroDenoiser.cpp dsp/AiGains.cpp)
 target_include_directories(zd_dsp PUBLIC dsp)
 target_link_libraries(zd_dsp PUBLIC zd_rnnoise)
+if(ZD_USE_PFFFT)
+  add_library(zd_pffft STATIC third_party/pffft/pffft.c)
+  target_include_directories(zd_pffft PUBLIC third_party/pffft)
+  set_target_properties(zd_pffft PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  if(MSVC)
+    target_compile_options(zd_pffft PRIVATE /O2 /fp:precise)
+  else()
+    target_compile_options(zd_pffft PRIVATE -O3 -w)
+  endif()
+  target_link_libraries(zd_dsp PUBLIC zd_pffft)
+  target_compile_definitions(zd_dsp PUBLIC ZD_USE_PFFFT=1)
+endif()
 set_target_properties(zd_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(zd_cli tools/zd_cli.cpp)
