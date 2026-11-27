@@ -396,9 +396,20 @@ void ZeroDenoiser::computeDspGain(float* out)
         const double frac = (double) cnt / (double) std::max(1, k1 - k0);
         const double v = std::max(std::clamp((frac - 0.05) / 0.15, 0.0, 1.0), fastVad); // fast path: previous hop
         vad = v > vad ? v : aVadRel * vad + (1.0 - aVadRel) * v;
-        const double ge = 1.0 * (1.0 - vad) + 0.5 * vad;
+        const double ge = 1.0 * (1.0 - vad) + dbgSoft * vad;
         if (ge != 1.0) {
-            if (hissFix & 4) {
+            if (hissFix & 128) {
+                const int hfSoftLo = (int) (dbgSoftLoHz / fs * nFFT), hfSoftHi = (int) (dbgSoftHiHz / fs * nFFT);
+                // v1.2: above ~4 kHz soften only bins that carry speech; hiss-only bins under
+                // the voice (between sibilants / above the voice) keep the full gain.
+                // Below, the whole curve is softened as before (voice timbre).
+                for (int k = 0; k < nBins; ++k) {
+                    const double t = std::clamp((k - hfSoftLo) / (double) std::max(1, hfSoftHi - hfSoftLo), 0.0, 1.0);
+                    const double s = 1.0 - t * (1.0 - std::clamp(graw[k] / 0.5, 0.0, 1.0));
+                    const double e = 1.0 - (1.0 - ge) * s;
+                    graw[k] = std::exp(e * std::log(std::max(graw[k], 1e-12)));
+                }
+            } else if (hissFix & 4) {
                 // soften only bins that carry speech (a-priori SNR around/above 0 dB);
                 // noise-only bins under the voice (hiss above the voice's range) keep the full gain
                 for (int k = 0; k < nBins; ++k) {
@@ -471,7 +482,7 @@ void ZeroDenoiser::computeDspGain(float* out)
         if (k >= hfStartBin && !(hissFix & 2)) { // keep some 'air' (sibilance, breath) while speech is present
             double v = vad;
             // ...only where there is HF signal above the noise (hiss-only bins are not kept)
-            if (hissFix & 64) v *= std::clamp((psm[k] / std::max(noise[k], 1e-20) - 1.5) / 3.0, 0.0, 1.0);
+            if (hissFix & 64) v *= std::clamp((psm[k] / std::max(noise[k], 1e-20) - dbgAirLo) / 3.0, 0.0, 1.0);
             gm = std::exp((1.0 - v) * std::log(gmin) + v * std::log(std::max(gmin, kHfFloor)));
         }
         out[k] = (float) (gm + (1.0 - gm) * gPrev[k]);
@@ -648,7 +659,10 @@ void ZeroDenoiser::analyseAi()
                     w = dist <= tol ? vpg : (dist <= tol + 1.0 ? vpg * (float) (tol + 1.0 - dist) : 0.0f);
                 }
                 w = std::max(w, vog);
-                gain[k] = std::max(gain[k], w * std::max(gDsp[k], gFloor[k]));
+                // v1.2: above 7 kHz the min-statistics floor reference passes hiss peaks under the
+                // voice; the DSP gain still protects real HF voice energy (sibilants, scream harmonics)
+                const float ref = (hissFix & 256) && k >= hfStartBin ? gDsp[k] : std::max(gDsp[k], gFloor[k]);
+                gain[k] = std::max(gain[k], w * ref);
             }
         } else {
             for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], vg * gDsp[k]);

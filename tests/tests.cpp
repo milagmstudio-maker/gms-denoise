@@ -411,6 +411,56 @@ static void testSteadyBackground()
     }
 }
 
+static void testHissUnderVoice()
+{
+    // v1.2: hiss above the voice's range must not ride along while the voice is present
+    // (per-bin softening above 4 kHz, AI: per-bin assist and HF guard reference), while the
+    // voice itself keeps its level. Voice = 180 Hz harmonic tone up to ~2 kHz, white noise.
+    auto hp = [](std::vector<float> x) { // 4th-order Butterworth high-pass at 8 kHz (two RBJ biquads)
+        const double w = 2.0 * M_PI * 8000.0 / 48000.0, c = std::cos(w);
+        for (double q : { 0.5411961, 1.3065630 }) {
+            const double al = std::sin(w) / (2.0 * q), a0 = 1.0 + al;
+            const double b0 = (1.0 + c) / 2.0 / a0, b1 = -(1.0 + c) / a0, b2 = b0, a1 = -2.0 * c / a0, a2 = (1.0 - al) / a0;
+            double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+            for (auto& v : x) { const double y = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v; y2 = y1; y1 = y; v = (float) y; }
+        }
+        return x;
+    };
+    for (int ai = 0; ai < 2; ++ai) {
+        double hf[2], vo[2];
+        for (int j = 0; j < 2; ++j) {
+            zd::ZeroDenoiser d; d.prepare(48000, 2);
+            if (j == 0) d.hissFix = 65; // v1.1 behaviour
+            zd::DenoiserParams p; p.ai = ai == 1; p.amount = 0.5f; p.reductionDb = 40.0f; p.maxJumpDb = 12.0f;
+            d.setParams(p); d.setLookahead(ai ? 480 : 0);
+            const int n = 48000 * 10, la = ai ? 480 : 0;
+            std::vector<float> nz(n), v(n, 0.0f);
+            std::mt19937 rng(5); std::normal_distribution<float> nd(0.f, 0.01f);
+            for (auto& s : nz) s = nd(rng);
+            for (int i = 0; i < n; ++i)
+                if ((i / 48000) % 2 == 1)
+                    for (int h = 1; h <= 11; ++h) v[i] += 0.08f / h * (float) std::sin(2.0 * M_PI * 180.0 * h * i / 48000.0);
+            std::vector<float> a(n), b(n);
+            for (int i = 0; i < n; ++i) { a[i] = nz[i] + 2.0f * v[i]; b[i] = nz[i]; }
+            float* ch[2] = { a.data(), b.data() };
+            for (int pos = 0; pos < n; pos += 512) { float* c2[2] = { ch[0] + pos, ch[1] + pos }; d.process(c2, 2, std::min(512, n - pos)); }
+            std::vector<float> vOut(n);
+            for (int i = 0; i < n; ++i) vOut[i] = 0.5f * (a[i] - b[i]); // voice path
+            const auto bh = hp(b), nh = hp(nz);
+            double eo = 0, ei = 0, vOutE = 0, vInE = 0;
+            for (int i = 48000 * 3; i + la < n; ++i)
+                if ((i / 48000) % 2 == 1 && (i % 48000) > 4800 && (i % 48000) < 43200) {
+                    eo += (double) bh[i + la] * bh[i + la]; ei += (double) nh[i] * nh[i];
+                    vOutE += (double) vOut[i + la] * vOut[i + la]; vInE += (double) v[i] * v[i];
+                }
+            hf[j] = 10 * std::log10(eo / ei); vo[j] = 10 * std::log10(vOutE / vInE);
+        }
+        CHECK(hf[1] < hf[0] - 4.0 && std::abs(vo[1] - vo[0]) < 0.3,
+              "%s: hiss above 8 kHz under the voice %.1f dB (v1.1: %.1f dB), voice %.2f dB (v1.1: %.2f dB)",
+              ai ? "AI" : "zero latency", hf[1], hf[0], vo[1], vo[0]);
+    }
+}
+
 int main()
 {
     testFFT();
@@ -427,6 +477,7 @@ int main()
     testPauseCleanup();
     testStartupHiss();
     testSteadyBackground();
+    testHissUnderVoice();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

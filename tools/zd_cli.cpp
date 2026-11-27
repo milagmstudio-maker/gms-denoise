@@ -35,6 +35,9 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_PCSRC")) d.pcSrc = std::atoi(std::getenv("ZD_PCSRC"));
     if (std::getenv("ZD_ACLO")) d.setVoicingBand(std::atof(std::getenv("ZD_ACLO")));
     if (std::getenv("ZD_TAIL")) d.dbgTail = std::atof(std::getenv("ZD_TAIL"));
+    if (std::getenv("ZD_SOFT")) d.dbgSoft = std::atof(std::getenv("ZD_SOFT"));
+    if (std::getenv("ZD_AIRLO")) d.dbgAirLo = std::atof(std::getenv("ZD_AIRLO"));
+    if (std::getenv("ZD_SLO")) { d.dbgSoftLoHz = std::atof(std::getenv("ZD_SLO")); d.dbgSoftHiHz = std::atof(std::getenv("ZD_SHI")); }
     if (std::getenv("ZD_NOCOMB")) d.dbgComb = false;
     if (std::getenv("ZD_NOFLOOR")) d.dbgFloor = false;
     if (std::getenv("ZD_FBIAS")) d.floorBias = std::atof(std::getenv("ZD_FBIAS"));

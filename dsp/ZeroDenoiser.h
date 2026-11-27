@@ -71,7 +71,7 @@ public:
     double pcThr = 0.3, pcHold = 0.15, pcRel = 0.06; int pcSrc = 3; // bits: 1 network VAD, 2 voice guard (pitched + onsets), 4 DSP vad, 8 pitched only
     bool onsetNeedsVad = false;
     double assistCap = 0.0316; // hiss assist: at most 30 dB below the network gain (v0.12; was 20)
-    int hissFix = 65; // v0.12 default 1|64. experiments: 1 tail gated, 2 no HF floor, 4 per-bin softening, 8 per-bin assist, 16 old warm-up tracking, 32 old fill
+    int hissFix = 457; // v1.2 default 1|8|64|128|256 (v0.12: 1|64). experiments: 1 tail gated, 2 no HF floor, 4 per-bin softening, 8 per-bin assist, 16 old warm-up tracking, 32 old fill
     double getPausePresence() const { return pcEnv; } // detector on the denoised output instead of the input
 
     // Latest per-bin gain (for metering/UI). Size getNumBins().
@@ -153,7 +153,7 @@ private:
     int lastLag = 0, combLag = 0;
     float gDspRawSafe(int) const { return 1.0f; } // tail floor is flat (bins above the voice are masked by it)
 public:
-    bool dbgFloor = true, dbgComb = true; double floorBias = 4.0, dbgTail = 0.25;
+    bool dbgFloor = true, dbgComb = true; double dbgSoft = 0.5, dbgAirLo = 1.5, dbgSoftLoHz = 4000.0, dbgSoftHiHz = 16000.0; double floorBias = 4.0, dbgTail = 0.25;
 private:
     double holdBudget = 0.0;
     double pcEnv = 1.0; long pcHoldCnt = 0;

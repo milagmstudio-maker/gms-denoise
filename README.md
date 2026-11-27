@@ -262,3 +262,24 @@ At 20 dB SNR: 28.1 -> 5.9 / 11.5. 6-noise cppeval (AI): SIG 3.23 -> 3.39 / 3.32,
 3.56, OVRL 2.84 -> 2.82 / 2.84, onsets -12.1 -> -6.6 / -7.8 dB (pause floor no longer gates
 onsets). DNSMOS does not reward steadiness; the gain is in SIG and onsets, paid in pause depth.
 Before any voice the reference is -10 dB, so noise-only input reaches -22 dB in Medium.
+
+## Hiss under the voice (1.2.0)
+
+User: while the plug-in works, a "saa / shii" hiss rides along with the voice. Measured (speech + white/pink
+hiss and 4 real noises, shadow filtering): nothing is *added* (a low-pass-only noise gets no extra HF,
+musical-noise spread barely changes); it is the input hiss left under the voice. In 0-4 kHz the old
+gains were already near an oracle Wiener mask (-6 vs -6..-9 dB, only a non-gain method can do more),
+but above ~8 kHz the old gains left -13..-16 dB where the oracle reaches -16..-30 dB, because
+(1) while speech is present the whole gain curve was softened (g^0.5), also in hiss-only bins above
+the voice, and (2) in AI mode the hiss assist was off under the voice and the voice guard's
+min-statistics reference let hiss peaks through above 7 kHz.
+Now (`hissFix` 457 = old 65 + 8 + 128 + 256):
+- 128: the softening fades to per-bin between 4 and 16 kHz (only bins that carry speech are softened).
+- 8 (AI): the hiss assist acts per bin under the voice where the DSP gain is low.
+- 256 (AI): above 7 kHz the voice guard uses the DSP gain as its reference, not the min-statistics floor.
+Hiss above 8 kHz under the voice (synthetic hiss, 10/20 dB SNR): zero -15.0 -> -20.7 dB, AI -13.6 -> -19.9;
+real-noise average zero -7.3 -> -9.8, AI -6.8 -> -9.6. DNSMOS OVRL unchanged (zero 2.81, AI 2.85),
+voice level and frames cut unchanged. Cost: the voice's own HF where it lies below loud hiss is cut
+with it (scream >7 kHz in 10 dB white hiss: zero -8.5 -> -14.5 dB, AI -5.3 -> -8.2); a 4-6 kHz ramp
+removed slightly more hiss but cut screams' HF to -21 dB, hence 4-16 kHz.
+Tuning hooks in zd_cli: ZD_HF (bits), ZD_SLO/ZD_SHI (ramp Hz), ZD_SOFT, ZD_AIRLO. Samples: samples_v14/.
