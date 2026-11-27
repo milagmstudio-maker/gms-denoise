@@ -296,3 +296,18 @@ pauses down to the Reduction floor at 100 % (after the first second). Musical-no
 DNSMOS OVRL equal or slightly higher. Cost: voice HF that lies under the hiss goes too (scream >7 kHz
 in 10 dB white hiss -14 -> -22 / -32 dB at 50 / 100 %); with non-hiss noise (office) the voice's HF
 changes by about 1 dB. Samples samples_v14/*_6_*_hisscut{50,100}.wav. UI: fourth knob in the bottom row.
+
+### Learn fix (1.2.0)
+
+User asked whether Learn really works. Measured (speech after a 3 s noise-only lead-in, Learn on during it):
+- Bug: the learning rate was `max(1 - 1/n, aLearn)`, i.e. a 2 s average from the very first frame instead of
+  a running mean, and frames that were still zero padding were learned. Learn switched on before playback
+  removed only -5 dB (zero) / -2 dB (AI) in the first 0.5 s and needed ~2 s to reach normal depth; a Learn
+  press mid-session briefly lost 2-5 dB (onset path started from a single frame). Now `min(...)` (running
+  mean, then ~2 s memory) and padding frames are skipped: -22 dB from 0.1 s on, no dip. Test testLearnFromStart.
+- Effect after learning on steady noise: Learn + Adaptive on = same result as no Learn (the tracker keeps
+  adapting). Learn + Adaptive off (frozen): zero mode DNSMOS OVRL 2.81 -> 2.85, BAK 3.6 -> 3.7, the voice
+  loses less (0-4 kHz -0.60 -> -0.43 dB, >8 kHz -1.99 -> -1.60 dB), pauses as deep. AI mode: no change
+  (the network decides). Frozen keeps sustained notes (they are not learned as noise), but does not follow
+  noise that changes.
+zd_cli: ZD_LEARN0 / ZD_LEARN (learn window in s), ZD_FREEZE (Adaptive off after), ZD_OLDLEARN.

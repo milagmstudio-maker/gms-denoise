@@ -462,6 +462,24 @@ static void testHissUnderVoice()
     }
 }
 
+static void testLearnFromStart()
+{
+    // 1.2: Learn switched on before playback (or for a short pass) must learn at once. Before,
+    // the profile was a 2 s average from the first frame and noise passed for 1-2 s.
+    for (int ai = 0; ai < 2; ++ai) {
+        zd::ZeroDenoiser d; d.prepare(48000, 1);
+        zd::DenoiserParams p; p.ai = ai == 1; p.learn = true; p.amount = 0.5f; p.reductionDb = 40.0f;
+        d.setParams(p); d.setLookahead(ai ? 480 : 0);
+        const int n = 48000 * 3, la = ai ? 480 : 0;
+        std::vector<float> x(n);
+        std::mt19937 rng(9); std::normal_distribution<float> nd(0.f, 0.03f);
+        for (auto& v : x) v = nd(rng);
+        std::vector<float> y = x; run(d, y, 480);
+        const double r = rmsDb(y, 4800 + la, 48000 + la) - rmsDb(x, 4800, 48000);
+        CHECK(r < -15.0, "%s: Learn from the start removes noise within 0.1-1 s (%.1f dB)", ai ? "AI" : "zero latency", r);
+    }
+}
+
 int main()
 {
     testFFT();
@@ -479,6 +497,7 @@ int main()
     testStartupHiss();
     testSteadyBackground();
     testHissUnderVoice();
+    testLearnFromStart();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

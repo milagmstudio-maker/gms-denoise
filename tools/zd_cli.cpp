@@ -27,6 +27,7 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_PC")) p.pauseCleanup = true;
     if (std::getenv("ZD_HISS")) p.hissCut = (float) std::atof(std::getenv("ZD_HISS"));
     if (std::getenv("ZD_HCO")) d.dbgHcOver = std::atof(std::getenv("ZD_HCO"));
+    if (std::getenv("ZD_OLDLEARN")) { d.learnFix = false; d.learnSkipFill = false; }
     if (std::getenv("ZD_JUMP")) p.maxJumpDb = (float) std::atof(std::getenv("ZD_JUMP"));
     if (std::getenv("ZD_OV")) d.onsetNeedsVad = true;
     if (std::getenv("ZD_CAP")) d.assistCap = std::atof(std::getenv("ZD_CAP"));
@@ -56,12 +57,19 @@ int main(int argc, char** argv)
     const size_t n = a.ch[0].size();
     std::vector<float*> ptr(nch);
     unsigned seed = 1;
+    const double learnSec = std::getenv("ZD_LEARN") ? std::atof(std::getenv("ZD_LEARN")) : 0.0;
+    const double learnFrom = std::getenv("ZD_LEARN0") ? std::atof(std::getenv("ZD_LEARN0")) : 0.0;
     FILE* dump = std::getenv("ZD_DUMP") ? std::fopen(std::getenv("ZD_DUMP"), "wb") : nullptr;
     auto t0 = std::chrono::steady_clock::now();
     for (size_t pos = 0; pos < n;) {
         int bs = block;
         if (bs <= 0) { seed = seed * 1103515245u + 12345u; bs = 1 + (seed >> 16) % 700; }
         bs = (int) std::min<size_t>(bs, n - pos);
+        if (learnSec > 0.0) {
+            const bool l = (double) pos < learnSec * a.sr && (double) pos >= learnFrom * a.sr;
+            if (l != p.learn) { p.learn = l; if (!l) p.adaptive = std::getenv("ZD_FREEZE") == nullptr; d.setParams(p); }
+            bs = (int) std::min<double>(bs, std::max(1.0, ((double) pos < learnFrom * a.sr ? learnFrom : learnSec) * a.sr - (double) pos));
+        }
         for (int c = 0; c < nch; ++c) ptr[c] = a.ch[c].data() + pos;
         if (dump) {
             for (int i = 0; i < bs; ++i) {

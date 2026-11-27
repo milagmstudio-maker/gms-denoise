@@ -355,8 +355,13 @@ void ZeroDenoiser::computeDspGain(float* out)
         holdBudget = std::min(holdBudget + 1.0 / 3.0, (double) maxVoiceHoldHops);
     }
     const bool frozen = (!params.adaptive && !learning && !warming) || voiceHold;
-    if (learning) ++learnFrames;
-    const double aL = std::max(1.0 - 1.0 / (double) std::max<long>(1, learnFrames), aLearn);
+    // Learn: plain running mean of the learned frames, then ~2 s memory (1.2: was max(), which
+    // made it a 2 s average from the first frame, so a Learn pass shorter than ~2 s hardly moved
+    // the profile and the onset path started from a single frame). Frames that are still mostly
+    // zero padding (Learn on from the start of playback) are not learned.
+    if (learning && !(learnSkipFill && (long) frames * hop < nFFT)) ++learnFrames;
+    const double aL = learnFix ? std::min(1.0 - 1.0 / (double) std::max<long>(1, learnFrames), aLearn)
+                               : std::max(1.0 - 1.0 / (double) std::max<long>(1, learnFrames), aLearn);
 
     const double amt = std::clamp((double) params.amount, 0.0, 1.0);
     const double over = 1.0 + 1.5 * amt;

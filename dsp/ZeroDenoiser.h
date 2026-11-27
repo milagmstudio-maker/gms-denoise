@@ -156,7 +156,7 @@ private:
     int lastLag = 0, combLag = 0;
     float gDspRawSafe(int) const { return 1.0f; } // tail floor is flat (bins above the voice are masked by it)
 public:
-    bool dbgFloor = true, dbgComb = true; double dbgSoft = 0.5, dbgHcOver = 10.0, dbgAirLo = 1.5, dbgSoftLoHz = 4000.0, dbgSoftHiHz = 16000.0; double floorBias = 4.0, dbgTail = 0.25;
+    bool dbgFloor = true, dbgComb = true; bool learnFix = true, learnSkipFill = true; double dbgSoft = 0.5, dbgHcOver = 10.0, dbgAirLo = 1.5, dbgSoftLoHz = 4000.0, dbgSoftHiHz = 16000.0; double floorBias = 4.0, dbgTail = 0.25;
 private:
     double holdBudget = 0.0;
     double pcEnv = 1.0; long pcHoldCnt = 0;
