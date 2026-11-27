@@ -427,11 +427,12 @@ static void testHissUnderVoice()
         return x;
     };
     for (int ai = 0; ai < 2; ++ai) {
-        double hf[2], vo[2];
-        for (int j = 0; j < 2; ++j) {
+        double hf[3], vo[3];
+        for (int j = 0; j < 3; ++j) {
             zd::ZeroDenoiser d; d.prepare(48000, 2);
             if (j == 0) d.hissFix = 65; // v1.1 behaviour
             zd::DenoiserParams p; p.ai = ai == 1; p.amount = 0.5f; p.reductionDb = 40.0f; p.maxJumpDb = 12.0f;
+            p.hissCut = j == 2 ? 1.0f : 0.0f;
             d.setParams(p); d.setLookahead(ai ? 480 : 0);
             const int n = 48000 * 10, la = ai ? 480 : 0;
             std::vector<float> nz(n), v(n, 0.0f);
@@ -455,9 +456,9 @@ static void testHissUnderVoice()
                 }
             hf[j] = 10 * std::log10(eo / ei); vo[j] = 10 * std::log10(vOutE / vInE);
         }
-        CHECK(hf[1] < hf[0] - 4.0 && std::abs(vo[1] - vo[0]) < 0.3,
-              "%s: hiss above 8 kHz under the voice %.1f dB (v1.1: %.1f dB), voice %.2f dB (v1.1: %.2f dB)",
-              ai ? "AI" : "zero latency", hf[1], hf[0], vo[1], vo[0]);
+        CHECK(hf[1] < hf[0] - 4.0 && std::abs(vo[1] - vo[0]) < 0.3 && hf[2] < hf[1] - 6.0 && std::abs(vo[2] - vo[1]) < 0.3,
+              "%s: hiss above 8 kHz under the voice %.1f dB (v1.1: %.1f, Hiss Cut 100 %%: %.1f), voice %.2f dB (v1.1: %.2f, cut: %.2f)",
+              ai ? "AI" : "zero latency", hf[1], hf[0], hf[2], vo[1], vo[0], vo[2]);
     }
 }
 

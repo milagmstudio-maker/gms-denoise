@@ -30,6 +30,7 @@ struct DenoiserParams {
     bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
     bool aiStrongVoice = false; // AI mode: protect quieter voices too (screams fully kept, more background chatter survives)
     bool pauseCleanup = false;  // AI mode: where no voice is detected, pull everything down to the Reduction floor (v0.11)
+    float hissCut = 0.0f;       // 0..1: extra removal of high-frequency hiss (above ~4-7 kHz), 1 = down to the Reduction floor (v1.2)
     float maxJumpDb = 0.0f;     // steady background: max dB the noise may drop between words vs under the voice (0 = no limit)
     float reductionDb = -1.0f;  // maximum attenuation in dB; < 0: follow amount (amount x 55 dB)
     float gateDb = -200.0f;     // gate threshold on the input level (dBFS); <= kGateOff: gate off
@@ -88,6 +89,8 @@ private:
 
     double floorGain() const;
     void applySteadiness(double presence);
+    void applyHissCut();
+    std::vector<double> hcPow, hcRel; double aHcPow = 0.0;
     std::vector<double> voiceRefPow; double aVoiceRef = 0.0; // linear minimum gain from reductionDb / amount
 
     DenoiserParams params;
@@ -153,7 +156,7 @@ private:
     int lastLag = 0, combLag = 0;
     float gDspRawSafe(int) const { return 1.0f; } // tail floor is flat (bins above the voice are masked by it)
 public:
-    bool dbgFloor = true, dbgComb = true; double dbgSoft = 0.5, dbgAirLo = 1.5, dbgSoftLoHz = 4000.0, dbgSoftHiHz = 16000.0; double floorBias = 4.0, dbgTail = 0.25;
+    bool dbgFloor = true, dbgComb = true; double dbgSoft = 0.5, dbgHcOver = 10.0, dbgAirLo = 1.5, dbgSoftLoHz = 4000.0, dbgSoftHiHz = 16000.0; double floorBias = 4.0, dbgTail = 0.25;
 private:
     double holdBudget = 0.0;
     double pcEnv = 1.0; long pcHoldCnt = 0;

@@ -25,6 +25,8 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_GATE")) p.gateDb = (float) std::atof(std::getenv("ZD_GATE"));
     if (std::getenv("ZD_GATEOUT")) d.gateDetectOutput = true;
     if (std::getenv("ZD_PC")) p.pauseCleanup = true;
+    if (std::getenv("ZD_HISS")) p.hissCut = (float) std::atof(std::getenv("ZD_HISS"));
+    if (std::getenv("ZD_HCO")) d.dbgHcOver = std::atof(std::getenv("ZD_HCO"));
     if (std::getenv("ZD_JUMP")) p.maxJumpDb = (float) std::atof(std::getenv("ZD_JUMP"));
     if (std::getenv("ZD_OV")) d.onsetNeedsVad = true;
     if (std::getenv("ZD_CAP")) d.assistCap = std::atof(std::getenv("ZD_CAP"));

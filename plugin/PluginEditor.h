@@ -22,8 +22,8 @@ private:
     ZeroDenoiseProcessor& proc;
     ucshared::AnalogLook look;
     juce::String panelId, serial;
-    ucshared::FineSlider amount, output, reduction, gate;
-    juce::Label amountLabel, outputLabel, modeLabel, reductionLabel, gateLabel, gateStatus;
+    ucshared::FineSlider amount, output, reduction, gate, hiss;
+    juce::Label amountLabel, outputLabel, modeLabel, reductionLabel, gateLabel, hissLabel, gateStatus;
     juce::ComboBox mode, strength;
     juce::Label strengthLabel;
     juce::TextButton learn { "LEARN" };
@@ -33,7 +33,7 @@ private:
     juce::ToggleButton pauseClean { "Pause cleanup" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> learnAtt, adaptAtt, voiceAtt, pauseAtt;
     int blink = 0;
-    juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt, reductionAtt, gateAtt;
+    juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt, reductionAtt, gateAtt, hissAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt, strengthAtt;
     int shownLatency = -1; float shownRate = 0.0f;
     juce::String latencyText, latencyTip;

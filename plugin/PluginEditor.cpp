@@ -24,7 +24,8 @@ juce::String jp(const char* utf8) { return juce::String::fromUTF8(utf8); }
 ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     : AudioProcessorEditor(&p), proc(p),
       amountAtt(p.apvts, "amount", amount), outputAtt(p.apvts, "output", output),
-      reductionAtt(p.apvts, "reduction", reduction), gateAtt(p.apvts, "gate", gate)
+      reductionAtt(p.apvts, "reduction", reduction), gateAtt(p.apvts, "gate", gate),
+      hissAtt(p.apvts, "hisscut", hiss)
 {
     setLookAndFeel(&look);
 
@@ -40,6 +41,8 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     knob(output, "output", 80);
     knob(reduction, "reduction", 80);
     knob(gate, "gate", 80);
+    knob(hiss, "hisscut", 80);
+    hiss.setTooltip(jp("高域（約4 kHz以上）のサー・シーを追加で落とします。0 % = 標準、100 % = Reduction の深さまで。上げるほど声の高域（息、歯擦音の弱い部分）も削れます。"));
     amount.setTooltip("How much of the noise is removed.");
     output.setTooltip("Output level.");
     reduction.setTooltip("Maximum noise reduction. 0 dB = no reduction.");
@@ -66,7 +69,7 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     addAndMakeVisible(strength);
     strengthAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "strength", strength);
 
-    for (auto* l : { &amountLabel, &outputLabel, &modeLabel, &reductionLabel, &gateLabel, &strengthLabel }) {
+    for (auto* l : { &amountLabel, &outputLabel, &modeLabel, &reductionLabel, &gateLabel, &hissLabel, &strengthLabel }) {
         l->setJustificationType(juce::Justification::centred);
         l->setFont(ucshared::analog::titleFont(12.0f).withExtraKerningFactor(0.08f));
         addAndMakeVisible(l);
@@ -79,6 +82,7 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     reductionLabel.setText("REDUCTION", juce::dontSendNotification);
     strengthLabel.setText("STRENGTH", juce::dontSendNotification);
     gateLabel.setText("GATE", juce::dontSendNotification);
+    hissLabel.setText("HISS CUT", juce::dontSendNotification);
     gateStatus.setJustificationType(juce::Justification::centred);
     gateStatus.setFont(juce::FontOptions(12.0f));
     addAndMakeVisible(gateStatus);
@@ -112,7 +116,7 @@ void ZeroDenoiseEditor::applyPanel(const juce::String& id)
     ucshared::analog::setPanel(id);
     look.refreshColours();
     panelButton.setButtonText(ucshared::analog::panelName(id));
-    for (auto* s : { &amount, &reduction, &gate, &output })
+    for (auto* s : { &amount, &reduction, &hiss, &gate, &output })
         s->setColour(juce::Slider::rotarySliderFillColourId, ucshared::analog::oxblood);
     // Components keep colours copied from the look: let them take the new ones.
     sendLookAndFeelChange();
@@ -243,13 +247,13 @@ void ZeroDenoiseEditor::paint(juce::Graphics& g)
     g.setColour(dimInk);
     g.drawText("NOISE", 24, 214, 200, 16, juce::Justification::centredLeft);
     g.drawText("DETECTION", 336, 214, 240, 16, juce::Justification::centredLeft);
-    g.drawText("RANGE  /  GATE  /  OUTPUT", 24, 452, 400, 16, juce::Justification::centredLeft);
+    g.drawText("RANGE  /  HISS  /  GATE  /  OUTPUT", 24, 452, 480, 16, juce::Justification::centredLeft);
     g.setColour(edge);
     g.drawHorizontalLine(232, 24.0f, (float) getWidth() - 24.0f);
     g.drawVerticalLine(318, 240.0f, 438.0f);
     g.drawHorizontalLine(470, 24.0f, (float) getWidth() - 24.0f);
-    g.drawVerticalLine(208, 478.0f, 600.0f);
-    g.drawVerticalLine(392, 478.0f, 600.0f);
+    for (int i = 1; i < 4; ++i)
+        g.drawVerticalLine(24 + i * (getWidth() - 48) / 4, 478.0f, 600.0f);
 
     drawEngraving(g, getWidth(), getHeight(), kModel, serial);
 }
@@ -274,14 +278,15 @@ void ZeroDenoiseEditor::resized()
     strengthLabel.setBounds(cx, 390, cw, 16);
     strength.setBounds(cx, 408, cw, 28);
 
-    const int colW = (w - 48) / 3, top = 478;
+    const int colW = (w - 48) / 4, top = 478;
     auto column = [&](juce::Label& label, juce::Slider& s, int i) {
         const int x = 24 + i * colW;
         label.setBounds(x, top, colW, 18);
-        s.setBounds(x + 22, top + 18, colW - 44, 104);
+        s.setBounds(x + 14, top + 18, colW - 28, 104);
     };
     column(reductionLabel, reduction, 0);
-    column(gateLabel, gate, 1);
-    column(outputLabel, output, 2);
-    gateStatus.setBounds(24 + colW, top + 124, colW, 16);
+    column(hissLabel, hiss, 1);
+    column(gateLabel, gate, 2);
+    column(outputLabel, output, 3);
+    gateStatus.setBounds(24 + 2 * colW, top + 124, colW, 16);
 }

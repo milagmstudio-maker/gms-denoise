@@ -283,3 +283,16 @@ voice level and frames cut unchanged. Cost: the voice's own HF where it lies bel
 with it (scream >7 kHz in 10 dB white hiss: zero -8.5 -> -14.5 dB, AI -5.3 -> -8.2); a 4-6 kHz ramp
 removed slightly more hiss but cut screams' HF to -21 dB, hence 4-16 kHz.
 Tuning hooks in zd_cli: ZD_HF (bits), ZD_SLO/ZD_SHI (ramp Hz), ZD_SOFT, ZD_AIRLO. Samples: samples_v14/.
+
+### Hiss Cut knob (1.2.0)
+
+User asked to set the high-frequency hiss removal themselves, up to removing it completely. New parameter
+`hisscut` "Hiss Cut" 0-100 % (default 0 = the behaviour above), `DenoiserParams::hissCut`. After the
+steadiness limit, bins above 4 kHz (full weight from 7 kHz) get power subtraction against the DSP noise
+estimate with over-subtraction 1 + 10 x cut on an 8 ms smoothed power, floor 60 dB x cut (never below
+Reduction), 20 ms release; the same under the voice and between words, so the high band does not
+breathe. Hiss above 8 kHz under the voice (white hiss 15 dB SNR): zero -16/-21/-26..-40 dB at 0/50/100 %,
+pauses down to the Reduction floor at 100 % (after the first second). Musical-noise spread unchanged,
+DNSMOS OVRL equal or slightly higher. Cost: voice HF that lies under the hiss goes too (scream >7 kHz
+in 10 dB white hiss -14 -> -22 / -32 dB at 50 / 100 %); with non-hiss noise (office) the voice's HF
+changes by about 1 dB. Samples samples_v14/*_6_*_hisscut{50,100}.wav. UI: fourth knob in the bottom row.

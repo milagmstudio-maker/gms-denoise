@@ -83,6 +83,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aSlow = std::exp(-frameT / 0.03);
     aTail = std::exp(-frameT / 0.15);
     aVoiceRef = 1.0 - std::exp(-frameT / 1.5);
+    aHcPow = std::exp(-frameT / 0.008);
     gateAtkC = std::exp(-1.0 / (0.0005 * fs));
     gateRelC = std::exp(-1.0 / (0.010 * fs));
     gateOpenC = std::exp(-1.0 / (0.0007 * fs));
@@ -118,6 +119,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     gDsp.assign(nBins, 1.0f);
     gFloor.assign(nBins, 1.0f);
     voiceRefPow.assign(nBins, 0.1); // before any voice: assume ~-10 dB under a voice
+    hcPow.assign(nBins, 0.0); hcRel.assign(nBins, 1.0);
     hTmp.assign(nTaps, 0.0f);
     graw.assign(nBins, 0.0);
     ps.assign(nFast / 2 + 1, 0.0);
@@ -165,6 +167,7 @@ void ZeroDenoiser::reset()
     floorRingPos = 0; floorHop = 0; floorFilled = 0;
     pcEnv = 1.0; pcHoldCnt = 0;
     voiceRefPow.assign(nBins, 0.1);
+    hcPow.assign(nBins, 0.0); hcRel.assign(nBins, 1.0);
     gateEnv = 0.0; gateGain = 1.0; gateOpen = true; gateHold = gateHoldLen; gateLevelDb = -120.0f;
     if (pendingLookahead >= 0) { lookahead = pendingLookahead; pendingLookahead = -1; }
     xfLen = 256 * scale; // ~5 ms
@@ -315,6 +318,7 @@ void ZeroDenoiser::analyse()
 {
     computeDspGain(gain.data());
     applySteadiness(vad);
+    applyHissCut();
     for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
@@ -695,6 +699,7 @@ void ZeroDenoiser::analyseAi()
         pcEnv = 1.0; pcHoldCnt = 0;
     }
     applySteadiness(std::max({ aiVad, voiced, vad }));
+    applyHissCut();
     {   // the Reduction setting is a hard limit (hiss assist may otherwise go below it)
         const float gmin = (float) floorGain();
         for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], gmin);
@@ -703,6 +708,32 @@ void ZeroDenoiser::analyseAi()
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
     for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
+}
+
+void ZeroDenoiser::applyHissCut()
+{
+    // Hiss cut (v1.2, user control): above ~4-7 kHz, power subtraction against the noise
+    // estimate with over-subtraction growing with hissCut; bins whose (8 ms smoothed) power is
+    // not clearly above the hiss go towards a floor that reaches the Reduction floor at 1.
+    // Applied after the steadiness limit, the same under the voice and between words, so the
+    // high band does not breathe. Strong sibilants (well above the hiss) pass.
+    const double h = std::clamp((double) params.hissCut, 0.0, 1.0);
+    const bool on = h > 1e-4 && (params.ai ? (params.aiHissAssist || params.aiVoiceGuard) : true); // needs the DSP noise estimate
+    const int kLo = (int) (4000.0 / fs * nFFT), kHi = (int) (7000.0 / fs * nFFT);
+    for (int k = kLo; k < nBins; ++k) hcPow[k] = frames <= 1 ? psm[k] : aHcPow * hcPow[k] + (1.0 - aHcPow) * psm[k];
+    if (!on) { for (int k = 0; k < nBins; ++k) hcRel[k] = 1.0; return; }
+    const double gmin = floorGain();
+    const double over = 1.0 + dbgHcOver * h;
+    const double fl = std::max(gmin, std::pow(10.0, -h * 60.0 / 20.0));
+    for (int k = kLo; k < nBins; ++k) {
+        const double wf = std::clamp((double) (k - kLo) / std::max(1, kHi - kLo), 0.0, 1.0);
+        const double q = 1.0 - over * noise[k] / std::max(hcPow[k], 1e-20);
+        double c = std::max(fl, std::sqrt(std::clamp(q, 0.0, 1.0)));
+        c = std::max(c, aRel * hcRel[k] + (1.0 - aRel) * c); // instant opening, 20 ms release
+        hcRel[k] = c;
+        const double g = std::max((double) gain[k], 1e-9);
+        if (c < g) gain[k] = (float) std::exp(std::log(g) + wf * (std::log(c) - std::log(g)));
+    }
 }
 
 void ZeroDenoiser::applySteadiness(double presence)
