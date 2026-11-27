@@ -84,6 +84,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     aTail = std::exp(-frameT / 0.15);
     aVoiceRef = 1.0 - std::exp(-frameT / 1.5);
     aHcPow = std::exp(-frameT / 0.008);
+    aNatPow = std::exp(-frameT / 0.03);
     gateAtkC = std::exp(-1.0 / (0.0005 * fs));
     gateRelC = std::exp(-1.0 / (0.010 * fs));
     gateOpenC = std::exp(-1.0 / (0.0007 * fs));
@@ -119,7 +120,7 @@ void ZeroDenoiser::prepare(double sampleRate, int numChannels)
     gDsp.assign(nBins, 1.0f);
     gFloor.assign(nBins, 1.0f);
     voiceRefPow.assign(nBins, 0.1); // before any voice: assume ~-10 dB under a voice
-    hcPow.assign(nBins, 0.0); hcRel.assign(nBins, 1.0);
+    hcPow.assign(nBins, 0.0); hcRel.assign(nBins, 1.0); natPow.assign(nBins, 0.0);
     hTmp.assign(nTaps, 0.0f);
     graw.assign(nBins, 0.0);
     ps.assign(nFast / 2 + 1, 0.0);
@@ -167,7 +168,7 @@ void ZeroDenoiser::reset()
     floorRingPos = 0; floorHop = 0; floorFilled = 0;
     pcEnv = 1.0; pcHoldCnt = 0;
     voiceRefPow.assign(nBins, 0.1);
-    hcPow.assign(nBins, 0.0); hcRel.assign(nBins, 1.0);
+    hcPow.assign(nBins, 0.0); hcRel.assign(nBins, 1.0); natPow.assign(nBins, 0.0);
     gateEnv = 0.0; gateGain = 1.0; gateOpen = true; gateHold = gateHoldLen; gateLevelDb = -120.0f;
     if (pendingLookahead >= 0) { lookahead = pendingLookahead; pendingLookahead = -1; }
     xfLen = 256 * scale; // ~5 ms
@@ -319,6 +320,7 @@ void ZeroDenoiser::analyse()
     computeDspGain(gain.data());
     applySteadiness(vad);
     applyHissCut();
+    applyNatural();
     for (int k = 0; k < nBins; ++k) gainOut[k] = gain[k];
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
@@ -705,6 +707,7 @@ void ZeroDenoiser::analyseAi()
     }
     applySteadiness(std::max({ aiVad, voiced, vad }));
     applyHissCut();
+    applyNatural();
     {   // the Reduction setting is a hard limit (hiss assist may otherwise go below it)
         const float gmin = (float) floorGain();
         for (int k = 0; k < nBins; ++k) gain[k] = std::max(gain[k], gmin);
@@ -713,6 +716,23 @@ void ZeroDenoiser::analyseAi()
     designMinPhase(gain.data(), hTmp.data());
     curRev.swap(nextRev);
     for (int i = 0; i < nTaps; ++i) nextRev[i] = hTmp[nTaps - 1 - i];
+}
+
+void ZeroDenoiser::applyNatural()
+{
+    // Natural (experiment): the output keeps beta x the noise in every bin, under the voice and
+    // between words alike, so what remains is a quieter copy of the original noise (same colour,
+    // steady) instead of a residue that changes with the gains. Per bin the target output power is
+    // g^2 P + beta^2 N, i.e. g' = sqrt(g^2 + beta^2 N / P) with P a 30 ms smoothed power.
+    const double n = std::clamp((double) params.natural, 0.0, 1.0);
+    for (int k = 0; k < nBins; ++k) natPow[k] = frames <= 1 ? psm[k] : aNatPow * natPow[k] + (1.0 - aNatPow) * psm[k];
+    if (n <= 1e-4) return;
+    const double beta = std::pow(10.0, (-40.0 + 28.0 * n) / 20.0); // -40 .. -12 dB
+    for (int k = 0; k < nBins; ++k) {
+        const double r = std::min(1.0, noise[k] / std::max(natPow[k], 1e-20));
+        const double g = gain[k];
+        gain[k] = (float) std::min(1.0, std::sqrt(g * g + beta * beta * r));
+    }
 }
 
 void ZeroDenoiser::applyHissCut()

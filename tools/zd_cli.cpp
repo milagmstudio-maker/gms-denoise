@@ -25,6 +25,7 @@ int main(int argc, char** argv)
     if (std::getenv("ZD_GATE")) p.gateDb = (float) std::atof(std::getenv("ZD_GATE"));
     if (std::getenv("ZD_GATEOUT")) d.gateDetectOutput = true;
     if (std::getenv("ZD_PC")) p.pauseCleanup = true;
+    if (std::getenv("ZD_NAT")) p.natural = (float) std::atof(std::getenv("ZD_NAT"));
     if (std::getenv("ZD_HISS")) p.hissCut = (float) std::atof(std::getenv("ZD_HISS"));
     if (std::getenv("ZD_HCO")) d.dbgHcOver = std::atof(std::getenv("ZD_HCO"));
     if (std::getenv("ZD_OLDLEARN")) { d.learnFix = false; d.learnSkipFill = false; }

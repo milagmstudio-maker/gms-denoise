@@ -30,6 +30,7 @@ struct DenoiserParams {
     bool aiVoiceGuard = true; // AI mode: where a pitched voice is detected the network may not cut below the DSP gain
     bool aiStrongVoice = false; // AI mode: protect quieter voices too (screams fully kept, more background chatter survives)
     bool pauseCleanup = false;  // AI mode: where no voice is detected, pull everything down to the Reduction floor (v0.11)
+    float natural = 0.0f;       // 0..1: keep a constant, noise-shaped floor (a quieter copy of the noise) everywhere (v1.2 experiment)
     float hissCut = 0.0f;       // 0..1: extra removal of high-frequency hiss (above ~4-7 kHz), 1 = down to the Reduction floor (v1.2)
     float maxJumpDb = 0.0f;     // steady background: max dB the noise may drop between words vs under the voice (0 = no limit)
     float reductionDb = -1.0f;  // maximum attenuation in dB; < 0: follow amount (amount x 55 dB)
@@ -90,6 +91,8 @@ private:
     double floorGain() const;
     void applySteadiness(double presence);
     void applyHissCut();
+    void applyNatural();
+    std::vector<double> natPow; double aNatPow = 0.0;
     std::vector<double> hcPow, hcRel; double aHcPow = 0.0;
     std::vector<double> voiceRefPow; double aVoiceRef = 0.0; // linear minimum gain from reductionDb / amount
 
