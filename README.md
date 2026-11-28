@@ -262,3 +262,52 @@ At 20 dB SNR: 28.1 -> 5.9 / 11.5. 6-noise cppeval (AI): SIG 3.23 -> 3.39 / 3.32,
 3.56, OVRL 2.84 -> 2.82 / 2.84, onsets -12.1 -> -6.6 / -7.8 dB (pause floor no longer gates
 onsets). DNSMOS does not reward steadiness; the gain is in SIG and onsets, paid in pause depth.
 Before any voice the reference is -10 dB, so noise-only input reaches -22 dB in Medium.
+
+## Hiss under the voice (1.2.0)
+
+User: while the plug-in works, a "saa / shii" hiss rides along with the voice. Measured (speech + white/pink
+hiss and 4 real noises, shadow filtering): nothing is *added* (a low-pass-only noise gets no extra HF,
+musical-noise spread barely changes); it is the input hiss left under the voice. In 0-4 kHz the old
+gains were already near an oracle Wiener mask (-6 vs -6..-9 dB, only a non-gain method can do more),
+but above ~8 kHz the old gains left -13..-16 dB where the oracle reaches -16..-30 dB, because
+(1) while speech is present the whole gain curve was softened (g^0.5), also in hiss-only bins above
+the voice, and (2) in AI mode the hiss assist was off under the voice and the voice guard's
+min-statistics reference let hiss peaks through above 7 kHz.
+Now (`hissFix` 457 = old 65 + 8 + 128 + 256):
+- 128: the softening fades to per-bin between 4 and 16 kHz (only bins that carry speech are softened).
+- 8 (AI): the hiss assist acts per bin under the voice where the DSP gain is low.
+- 256 (AI): above 7 kHz the voice guard uses the DSP gain as its reference, not the min-statistics floor.
+Hiss above 8 kHz under the voice (synthetic hiss, 10/20 dB SNR): zero -15.0 -> -20.7 dB, AI -13.6 -> -19.9;
+real-noise average zero -7.3 -> -9.8, AI -6.8 -> -9.6. DNSMOS OVRL unchanged (zero 2.81, AI 2.85),
+voice level and frames cut unchanged. Cost: the voice's own HF where it lies below loud hiss is cut
+with it (scream >7 kHz in 10 dB white hiss: zero -8.5 -> -14.5 dB, AI -5.3 -> -8.2); a 4-6 kHz ramp
+removed slightly more hiss but cut screams' HF to -21 dB, hence 4-16 kHz.
+Tuning hooks in zd_cli: ZD_HF (bits), ZD_SLO/ZD_SHI (ramp Hz), ZD_SOFT, ZD_AIRLO. Samples: samples_v14/.
+
+### Hiss Cut knob (1.2.0)
+
+User asked to set the high-frequency hiss removal themselves, up to removing it completely. New parameter
+`hisscut` "Hiss Cut" 0-100 % (default 0 = the behaviour above), `DenoiserParams::hissCut`. After the
+steadiness limit, bins above 4 kHz (full weight from 7 kHz) get power subtraction against the DSP noise
+estimate with over-subtraction 1 + 10 x cut on an 8 ms smoothed power, floor 60 dB x cut (never below
+Reduction), 20 ms release; the same under the voice and between words, so the high band does not
+breathe. Hiss above 8 kHz under the voice (white hiss 15 dB SNR): zero -16/-21/-26..-40 dB at 0/50/100 %,
+pauses down to the Reduction floor at 100 % (after the first second). Musical-noise spread unchanged,
+DNSMOS OVRL equal or slightly higher. Cost: voice HF that lies under the hiss goes too (scream >7 kHz
+in 10 dB white hiss -14 -> -22 / -32 dB at 50 / 100 %); with non-hiss noise (office) the voice's HF
+changes by about 1 dB. Samples samples_v14/*_6_*_hisscut{50,100}.wav. UI: fourth knob in the bottom row.
+
+### Learn fix (1.2.0)
+
+User asked whether Learn really works. Measured (speech after a 3 s noise-only lead-in, Learn on during it):
+- Bug: the learning rate was `max(1 - 1/n, aLearn)`, i.e. a 2 s average from the very first frame instead of
+  a running mean, and frames that were still zero padding were learned. Learn switched on before playback
+  removed only -5 dB (zero) / -2 dB (AI) in the first 0.5 s and needed ~2 s to reach normal depth; a Learn
+  press mid-session briefly lost 2-5 dB (onset path started from a single frame). Now `min(...)` (running
+  mean, then ~2 s memory) and padding frames are skipped: -22 dB from 0.1 s on, no dip. Test testLearnFromStart.
+- Effect after learning on steady noise: Learn + Adaptive on = same result as no Learn (the tracker keeps
+  adapting). Learn + Adaptive off (frozen): zero mode DNSMOS OVRL 2.81 -> 2.85, BAK 3.6 -> 3.7, the voice
+  loses less (0-4 kHz -0.60 -> -0.43 dB, >8 kHz -1.99 -> -1.60 dB), pauses as deep. AI mode: no change
+  (the network decides). Frozen keeps sustained notes (they are not learned as noise), but does not follow
+  noise that changes.
+zd_cli: ZD_LEARN0 / ZD_LEARN (learn window in s), ZD_FREEZE (Adaptive off after), ZD_OLDLEARN.

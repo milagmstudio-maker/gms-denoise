@@ -66,6 +66,7 @@ private:
     std::atomic<float>* gateParam = nullptr;
     std::atomic<float>* pauseParam = nullptr;
     std::atomic<float>* strengthParam = nullptr;
+    std::atomic<float>* hissParam = nullptr;
 public:
     // Strength: how far the background may drop between words compared with under the voice
     // (Gentle 6 dB / Medium 12 dB / Strong: no limit). Smaller = less 'breathing'.
