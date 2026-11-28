@@ -67,6 +67,21 @@ endif()
 add_executable(zd_cli tools/zd_cli.cpp)
 target_link_libraries(zd_cli PRIVATE zd_dsp)
 
+# Embedding API for other hosts (e.g. your own mixer): shizumaru.dll / libshizumaru.so
+# with the C interface in sdk/shizumaru.h. See sdk/README_ja.md.
+option(ZD_BUILD_SDK "Build the embedding library (sdk/)" ON)
+if(ZD_BUILD_SDK)
+  add_library(shizumaru SHARED sdk/shizumaru.cpp)
+  target_link_libraries(shizumaru PRIVATE zd_dsp)
+  target_compile_definitions(shizumaru PRIVATE SHZ_BUILD_DLL)
+  set_target_properties(shizumaru PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  if(NOT WIN32)
+    target_compile_definitions(shizumaru PUBLIC SHZ_STATIC)  # no dllimport off Windows
+  endif()
+  add_executable(shz_example sdk/example/shz_example.cpp)
+  target_link_libraries(shz_example PRIVATE shizumaru)
+endif()
+
 enable_testing()
 add_executable(zd_tests tests/tests.cpp)
 target_link_libraries(zd_tests PRIVATE zd_dsp)

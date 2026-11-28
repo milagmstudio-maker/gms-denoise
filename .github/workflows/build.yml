@@ -35,10 +35,24 @@ jobs:
         run: cmake -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build
-        run: cmake --build build --config Release --target GmSDeNoise_VST3 zd_host_check zd_glitch_check zd_tests --parallel
+        run: cmake --build build --config Release --target GmSDeNoise_VST3 zd_host_check zd_glitch_check zd_tests shizumaru shz_example --parallel
 
       - name: DSP unit tests
         run: build\Release\zd_tests.exe
+
+      - name: Embedding kit self-test (shizumaru.dll)
+        run: build\Release\shz_example.exe
+
+      - name: Embedding kit (dll + lib + header + example)
+        shell: pwsh
+        run: |
+          $k = "sdkpkg\Shizumaru-SDK-Windows"
+          New-Item -ItemType Directory "$k\bin", "$k\lib", "$k\include", "$k\example" | Out-Null
+          Copy-Item build\Release\shizumaru.dll, build\Release\shz_example.exe "$k\bin\"
+          Copy-Item build\Release\shizumaru.lib "$k\lib\"
+          Copy-Item sdk\shizumaru.h "$k\include\"
+          Copy-Item sdk\example\shz_example.cpp "$k\example\"
+          Copy-Item sdk\README_ja.md, packaging\ThirdPartyNotices.txt "$k\"
 
       - name: No extra runtime needed (only Windows system DLLs)
         shell: pwsh
@@ -112,6 +126,11 @@ jobs:
         with:
           name: Shizumaru-Windows
           path: dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shizumaru-SDK-Windows
+          path: sdkpkg/*
 
   macos:
     runs-on: macos-latest
