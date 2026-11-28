@@ -32,6 +32,12 @@ GmS Audio（Genomersive Studio のオーディオブランド）
 ■ 使い方
   まず MODE を選びます。
     AI (10 ms)     一番よく消えるモード（おすすめ）。10 ms の遅れが出ます（DAW が自動で補正します）。
+    AI Deep (20 ms)     DeepFilterNet3 による除去。声の変化が少なく自然。20 ms の遅れ。
+    AI Deep HQ (40 ms)  DeepFilterNet3 標準版。語間の雑音をより深く消します。40 ms の遅れ。
+                   AI Deep の2つは悲鳴・叫び声を自動で保護します。初めて選んだときはモデルの
+                   読み込みに約1秒かかり、その間は素通しになります（表示が "loading AI..."）。
+                   CPU は AI Deep が重め（1コアの約25%）。オーディオのバッファサイズは 256 以上を推奨。
+                   AI Deep では LEARN / Adaptive / HISS CUT / STRENGTH / GATE は使われません。
     Zero latency   遅れゼロ。配信やモニターしながらの録音向け。
     Low latency / High quality   その中間。
   AMOUNT       どれだけ積極的にノイズと判定して消すか（既定 70）
@@ -44,5 +50,5 @@ GmS Audio（Genomersive Studio のオーディオブランド）
   OUTPUT       出力の音量
   LEARN        ノイズだけの部分で押して、終わったらもう一度押すとそのノイズを覚えます（普段は不要）
   Adaptive     ノイズの変化に自動で追従（既定 ON）
-  Strong voice protect（AI モードのみ）  叫び声を最優先で守る。周りの話し声は少し残りやすくなります。
+  Strong voice protect（AI / AI Deep）  叫び声を最優先で守る。周りの話し声は少し残りやすくなります。
   Pause cleanup（AI モードのみ）          声のない区間を REDUCTION の値まで深く下げる（STRENGTH が Strong のとき有効）。

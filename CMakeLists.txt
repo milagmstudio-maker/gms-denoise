@@ -5,7 +5,7 @@ if(APPLE)
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
 endif()
 
-project(GmSDeNoise VERSION 1.2.0 LANGUAGES C CXX)
+project(GmSDeNoise VERSION 1.3.0 LANGUAGES C CXX)
 
 # Windows (MSVC): UTF-8 sources, static C runtime (no Visual C++ redistributable
 # needed on the user's PC), symbols kept in the build for crash tracing.
@@ -38,7 +38,7 @@ endif()
 # pffft for the analysis FFTs (BSD-like, vendored; ZD_USE_PFFFT=0 keeps the
 # built-in radix-2 FFT of dsp/FFT.h).
 option(ZD_USE_PFFFT "Use pffft for the analysis FFTs" ON)
-add_library(zd_dsp STATIC dsp/ZeroDenoiser.cpp dsp/AiGains.cpp)
+add_library(zd_dsp STATIC dsp/ZeroDenoiser.cpp dsp/AiGains.cpp dsp/DfnRunner.cpp)
 target_include_directories(zd_dsp PUBLIC dsp)
 target_link_libraries(zd_dsp PUBLIC zd_rnnoise)
 if(ZD_USE_PFFFT)
@@ -54,6 +54,15 @@ if(ZD_USE_PFFFT)
   target_compile_definitions(zd_dsp PUBLIC ZD_USE_PFFFT=1)
 endif()
 set_target_properties(zd_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# DeepFilterNet3 modes "AI Deep" / "AI Deep HQ" (Rust bridge, needs cargo).
+# OFF: the two modes fall back to the RNNoise AI mode.
+option(ZD_WITH_DFN "Build the DeepFilterNet3 modes (needs Rust/cargo)" ON)
+if(ZD_WITH_DFN)
+  include(cmake/DfBridge.cmake)
+  target_link_libraries(zd_dsp PUBLIC zd_dfbridge)
+  target_compile_definitions(zd_dsp PUBLIC ZD_HAS_DFN=1)
+endif()
 
 add_executable(zd_cli tools/zd_cli.cpp)
 target_link_libraries(zd_cli PRIVATE zd_dsp)

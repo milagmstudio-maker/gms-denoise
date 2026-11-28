@@ -3,13 +3,14 @@
 #include <array>
 #include <atomic>
 #include "ZeroDenoiser.h"
+#include "DfnRunner.h"
 
 class ZeroDenoiseProcessor : public juce::AudioProcessor {
 public:
     static constexpr int kMeterBands = 48;
 
     ZeroDenoiseProcessor();
-    ~ZeroDenoiseProcessor() override = default;
+    ~ZeroDenoiseProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -44,12 +45,21 @@ public:
 
     // Mode -> lookahead in samples (signal delay reported to the host)
     // AI: RNNoise gains need one 480-sample network frame of lookahead (10 ms @48k).
-    static constexpr int kNumModes = 4;
+    // AI Deep / AI Deep HQ (1.3): DeepFilterNet3 low-latency / standard model, 20 / 40 ms
+    // at every rate (latency from zd::DfnRunner::latencyFor). New modes go at the end so
+    // saved projects keep their mode.
+    static constexpr int kNumModes = 6;
     static constexpr int kModeAi = 3;
-    static constexpr int kModeLookahead[kNumModes] = { 0, 128, 512, 480 };
-    static juce::StringArray modeNames() { return { "Zero latency", "Low latency", "High quality", "AI (10 ms)" }; }
+    static constexpr int kModeDfn = 4;   // DFN model 0
+    static constexpr int kModeDfnHq = 5; // DFN model 1
+    static constexpr int kModeLookahead[kNumModes] = { 0, 128, 512, 480, -1, -1 };
+    static juce::StringArray modeNames() { return { "Zero latency", "Low latency", "High quality", "AI (10 ms)", "AI Deep (20 ms)", "AI Deep HQ (40 ms)" }; }
     bool isAiMode() const { return aiModeForUi.load(); }
+    bool isDfnMode() const { return dfnModeForUi.load(); }
+    bool isDfnLoading() const { return dfnLoadingForUi.load(); }
     std::atomic<bool> aiModeForUi { false };
+    std::atomic<bool> dfnModeForUi { false };
+    std::atomic<bool> dfnLoadingForUi { false };
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -76,6 +86,22 @@ private:
     void applyMode();
     juce::SmoothedValue<float> outGain;
     std::array<int, kMeterBands + 1> meterEdges {};
+    std::array<int, kMeterBands + 1> dfnMeterEdges {};
+
+    // DeepFilterNet modes: networks load on this thread when a mode needs them
+    zd::DfnRunner dfn;
+    struct DfnLoader : juce::Thread {
+        explicit DfnLoader(zd::DfnRunner& r) : juce::Thread("Shizumaru DFN loader"), runner(r) {}
+        void run() override;
+        zd::DfnRunner& runner;
+    } dfnLoader { dfn };
+    // signal path: 0 = ZeroDenoiser (modes 0-3), 1/2 = DFN model 0/1. A change of path is
+    // crossfaded over kPathFade samples (both paths run meanwhile).
+    int path = 0, prevPath = -1, fadeLeft = 0, fadeLen = 1;
+    double currentRate = 48000.0;
+    juce::AudioBuffer<float> inCopy, pathA, pathB;
+    static int pathOfMode(int mode) { return mode == kModeDfn ? 1 : mode == kModeDfnHq ? 2 : 0; }
+    void runPath(int which, juce::AudioBuffer<float>& io, int numCh, int n, const zd::DfnParams& dp);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ZeroDenoiseProcessor)
 };

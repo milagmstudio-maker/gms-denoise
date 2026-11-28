@@ -34,14 +34,14 @@ int main(int argc, char** argv)
     juce::AudioProcessorParameter* mp = nullptr;
     for (auto* p : params) if (p->getName(32) == "Mode") mp = p;
     const int nModes = mp ? mp->getNumSteps() : 0;
-    check(nModes == 4, "Mode has " + juce::String(nModes) + " choices");
+    check(nModes == 6, "Mode has " + juce::String(nModes) + " choices");
     auto setMode = [&](int idx) { mp->setValueNotifyingHost((float) idx / (float) (nModes - 1)); };
 
     // every mode: host must see the new latency
-    if (mp != nullptr && nModes == 4) {
-        const int expect[4] = { 0, 128, 512, 480 };
+    if (mp != nullptr && nModes == 6) {
+        const int expect[6] = { 0, 128, 512, 480, 960, 1920 };
         juce::AudioBuffer<float> b(2, 256); juce::MidiBuffer m; b.clear();
-        for (int idx : { 1, 2, 3, 0 }) {
+        for (int idx : { 1, 2, 3, 4, 5, 0 }) {
             setMode(idx);
             inst->processBlock(b, m);
             check(inst->getLatencySamples() == expect[idx],
@@ -78,7 +78,7 @@ int main(int argc, char** argv)
     if (mp) setMode(0);
     noiseRun(256, red);
     check(red < -25.0, "Zero latency: white noise reduction through host: " + juce::String(red, 1) + " dB");
-    if (mp && nModes == 4) {
+    if (mp && nModes == 6) {
         // each run restarts the network (mode off -> on), so all block sizes must agree
         std::vector<double> reds;
         for (int block : { 256, 37, 1024 }) {
@@ -92,17 +92,32 @@ int main(int argc, char** argv)
         const auto mm = std::minmax_element(reds.begin(), reds.end());
         check(*mm.second - *mm.first < 0.5, "AI mode result independent of host block size (spread " +
               juce::String(*mm.second - *mm.first, 2) + " dB)");
-        // AI at other sample rates: lookahead scales with the rate
+        // AI Deep / AI Deep HQ (DeepFilterNet3): offline so the network loads at once
+        inst->setNonRealtime(true);
+        for (int dm : { 4, 5 }) {
+            setMode(0);
+            { juce::AudioBuffer<float> b(2, 64); juce::MidiBuffer m; b.clear(); inst->processBlock(b, m); }
+            setMode(dm);
+            noiseRun(256, red);
+            check(red < -25.0, mp->getCurrentValueAsText() + ": white noise " + juce::String(red, 1) + " dB");
+        }
+        inst->setNonRealtime(false);
+        setMode(3);
+        // AI at other sample rates: lookahead scales with the rate; AI Deep stays ~20 / 40 ms
         for (double sr : { 44100.0, 96000.0 }) {
             inst->releaseResources();
             inst->setPlayConfigDetails(2, 2, sr, 1024);
             inst->prepareToPlay(sr, 1024);
             juce::AudioBuffer<float> b(2, 256); juce::MidiBuffer m; b.clear();
-            inst->processBlock(b, m);
-            const int lat = inst->getLatencySamples();
-            const int expect = sr > 50000 ? 960 : 480;
-            check(lat == expect, "AI mode @" + juce::String(sr / 1000.0, 1) + " kHz latency " + juce::String(lat) +
-                  " smp = " + juce::String(1000.0 * lat / sr, 2) + " ms");
+            for (int dm : { 3, 4, 5 }) {
+                setMode(dm);
+                inst->processBlock(b, m);
+                const int lat = inst->getLatencySamples();
+                const int expect = dm == 3 ? (sr > 50000 ? 960 : 480) : dm == 4 ? (sr > 50000 ? 2026 : 936) : (sr > 50000 ? 3946 : 1818);
+                check(lat == expect, mp->getCurrentValueAsText() + " @" + juce::String(sr / 1000.0, 1) + " kHz latency " + juce::String(lat) +
+                      " smp = " + juce::String(1000.0 * lat / sr, 2) + " ms");
+            }
+            setMode(3);
         }
         inst->releaseResources();
         inst->setPlayConfigDetails(2, 2, 48000.0, 1024);

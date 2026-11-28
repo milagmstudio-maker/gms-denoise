@@ -1,11 +1,13 @@
 // Minimal self-contained tests for the DSP core (no framework needed).
 #include "../dsp/FFT.h"
 #include "../dsp/ZeroDenoiser.h"
+#include "../dsp/DfnRunner.h"
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
 #include <random>
 #include <vector>
+#include <limits>
 
 static int failures = 0;
 #define CHECK(cond, ...)                                                    \
@@ -480,6 +482,103 @@ static void testLearnFromStart()
     }
 }
 
+static void testDfnModes()
+{
+    if (!zd::DfnRunner::available()) { std::printf("skip DFN tests (built without the bridge)\n"); return; }
+    for (double sr : { 48000.0, 44100.0, 96000.0 }) {
+        for (int m = 0; m < 2; ++m) {
+            zd::DfnRunner r; r.prepare(sr, 2);
+            const int L = zd::DfnRunner::latencyFor(m, sr);
+            const bool ok = r.load(m);
+            CHECK(ok, "DFN %d @%.1f kHz loads (latency %d smp = %.1f ms)", m, sr / 1000, L, 1000.0 * L / sr);
+            if (!ok) continue;
+            // Reduction 0 dB: the network path must be exactly the input delayed by the reported latency
+            const int n = (int) sr * 2;
+            std::vector<float> a(n), b(n);
+            std::mt19937 rng(3); std::normal_distribution<float> nd(0.f, 0.1f);
+            for (int i = 0; i < n; ++i) { // band-limited (the resampler passes up to ~20 kHz)
+                const double t = i / sr;
+                a[i] = (float) (0.3 * std::sin(2 * M_PI * 220 * t) + 0.1 * std::sin(2 * M_PI * 3100 * t) + 0.05 * std::sin(2 * M_PI * 12000 * t)) + nd(rng) * 0.0f;
+                b[i] = -a[i];
+            }
+            std::vector<float> ya = a, yb = b;
+            zd::DfnParams p; p.attenDb = 0.0f;
+            for (int i = 0; i < n; i += 300) {
+                const int k = std::min(300, n - i);
+                float* io[2] = { ya.data() + i, yb.data() + i };
+                r.process(m, io, 2, k, p);
+            }
+            double e = 0, ref = 0;
+            for (int i = n / 2; i < n; ++i) { e = std::max(e, (double) std::fabs(ya[i] - a[i - L])); ref = std::max(ref, (double) std::fabs(a[i])); }
+            CHECK(e < (sr == 48000.0 ? 1e-4 : 1e-3) * ref, "DFN %d @%.1f kHz, Reduction 0: output = input delayed %d smp (max err %.1e)", m, sr / 1000, L, e);
+        }
+    }
+    // noise reduction, block-size independence, L-only, NaN
+    for (int m = 0; m < 2; ++m) {
+        auto runAll = [&](int block, std::vector<float>& L, std::vector<float>& R) {
+            zd::DfnRunner r; r.prepare(48000, 2); r.load(m);
+            zd::DfnParams p;
+            for (size_t i = 0; i < L.size(); i += (size_t) block) {
+                const int k = (int) std::min((size_t) block, L.size() - i);
+                float* io[2] = { L.data() + i, R.data() + i };
+                r.process(m, io, 2, k, p);
+            }
+        };
+        const int n = 48000 * 3;
+        std::vector<float> x(n), z(n, 0.0f);
+        std::mt19937 rng(5); std::normal_distribution<float> nd(0.f, 0.05f);
+        for (auto& v : x) v = nd(rng);
+        std::vector<float> l1 = x, r1 = z; runAll(256, l1, r1);
+        const double red = rmsDb(l1, 48000 * 2, n) - rmsDb(x, 48000 * 2 - 2000, n - 2000);
+        double rmax = 0; for (float v : r1) rmax = std::max(rmax, (double) std::fabs(v));
+        CHECK(red < -25.0 && rmax == 0.0, "DFN %d: white noise %.1f dB, silent R stays exactly silent (%.1e)", m, red, rmax);
+        std::vector<float> l2 = x, r2 = z; runAll(37, l2, r2);
+        double d = 0; for (int i = 0; i < n; ++i) d = std::max(d, (double) std::fabs(l1[i] - l2[i]));
+        CHECK(d == 0.0, "DFN %d: output independent of host block size (max diff %.1e)", m, d);
+        std::vector<float> l3 = x, r3 = x; l3[48000] = std::numeric_limits<float>::quiet_NaN(); r3[48001] = std::numeric_limits<float>::infinity();
+        runAll(256, l3, r3);
+        bool fin = true; for (int i = 0; i < n; ++i) fin = fin && std::isfinite(l3[i]) && std::isfinite(r3[i]);
+        CHECK(fin, "DFN %d: NaN / Inf input sample -> output stays finite", m);
+    }
+    // not loaded yet: delayed dry, then a smooth crossfade once the engine arrives
+    {
+        zd::DfnRunner r; r.prepare(48000, 1);
+        const int L = zd::DfnRunner::latencyFor(1, 48000), n = 48000 * 2;
+        std::vector<float> x(n); for (int i = 0; i < n; ++i) x[i] = 0.3f * std::sin(0.02f * i);
+        std::vector<float> y = x;
+        zd::DfnParams p;
+        bool dryOk = true;
+        for (int i = 0; i < n; i += 512) {
+            if (i == 48000 / 2 / 512 * 512) r.load(1);
+            const int k = std::min(512, n - i);
+            float* io[1] = { y.data() + i };
+            r.process(1, io, 1, k, p);
+            if (i + k < 24000) for (int j = i; j < i + k; ++j) if (j >= L && std::fabs(y[j] - x[j - L]) > 1e-6f) dryOk = false;
+        }
+        double jump = 0; for (int i = L + 1; i < n; ++i) jump = std::max(jump, (double) std::fabs(y[i] - y[i - 1]));
+        CHECK(dryOk && jump < 0.05 && r.isWet(1), "DFN before load = exact delayed input; switch-in is smooth (max step %.3f)", jump);
+    }
+    // switching into the mode mid-stream: the delayed input is there from the first sample
+    {
+        zd::DfnRunner r; r.prepare(48000, 1); r.load(0);
+        const int L = zd::DfnRunner::latencyFor(0, 48000), n = 48000;
+        std::vector<float> x(n); for (int i = 0; i < n; ++i) x[i] = 0.3f * std::sin(0.02f * i);
+        std::vector<float> y = x;
+        zd::DfnParams p;
+        bool ok = true;
+        for (int i = 0; i < n; i += 256) {
+            const int k = std::min(256, n - i);
+            float* io[1] = { y.data() + i };
+            if (i < n / 2) { const float* in[1] = { x.data() + i }; r.idle(0, in, 1, k); }
+            else {
+                r.process(0, io, 1, k, p);
+                if (i < n / 2 + L) for (int j = i; j < i + k; ++j) if (std::fabs(y[j] - x[j - L]) > 1e-6f) ok = false;
+            }
+        }
+        CHECK(ok, "DFN switched in mid-stream: delayed input from the first sample (no gap)");
+    }
+}
+
 int main()
 {
     testFFT();
@@ -498,6 +597,7 @@ int main()
     testSteadyBackground();
     testHissUnderVoice();
     testLearnFromStart();
+    testDfnModes();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }
