@@ -120,11 +120,11 @@ jobs:
 
       - name: Rust toolchain (DeepFilterNet bridge for the AI Deep modes)
         run: |
-          rustup toolchain install stable --profile minimal || (curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal)
-          source "$HOME/.cargo/env" 2>/dev/null || true
+          set -x
+          rustup toolchain install stable --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin
           rustup default stable
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup target list --installed
+          which cargo
           cargo --version
 
       - uses: actions/cache@v4
