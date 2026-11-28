@@ -33,7 +33,10 @@ struct Inst {
     std::map<juce::String, juce::AudioProcessorParameter*> par;
     double fs = 48000;
     void set(const juce::String& name, float norm) { if (auto* x = par[name]) x->setValueNotifyingHost(juce::jlimit(0.f, 1.f, norm)); }
-    void setMode(int m) { set("Mode", m / 3.0f); }
+    // AI Deep modes (4, 5): offline processing loads the network at once instead of in the
+    // background, so runs are repeatable (block-size comparisons). The realtime background
+    // load + crossfade is covered by zd_tests.
+    void setMode(int m) { if (m >= 4) p->setNonRealtime(true); set("Mode", m / 5.0f); }
     void setGateDb(float db) { set("Gate Threshold", (db + 90.f) / 80.f); } // -90 (Off) .. -10
 };
 
@@ -104,7 +107,7 @@ static GlitchStats analyse(const Sig& x, const Sig& y, double fs, double skipSec
 {
     GlitchStats st;
     const int frame = (int) std::lround(fs * 0.0025);
-    const int reach = (int) std::ceil((fs * 0.025) / frame) + 1; // latency (<=10.7 ms) + FIR (10.7 ms) + margin
+    const int reach = (int) std::ceil((fs * 0.06) / frame) + 1; // latency (<=42 ms, AI Deep HQ) + FIR (10.7 ms) + margin
     for (size_t c = 0; c < x.size(); ++c) {
         for (float v : y[c]) { if (!std::isfinite(v)) st.finite = false; else st.peak = std::max(st.peak, (double) std::fabs(v)); }
         if (!st.finite) return st;
@@ -207,7 +210,7 @@ int main(int argc, char** argv)
     g_plugin = argv[1];
     juce::File speechFile = argc > 2 ? juce::File(argv[2]) : juce::File();
     if (argc > 3) g_outDir = juce::File(argv[3]);
-    const char* modeName[4] = { "Zero", "Low", "HQ", "AI" };
+    const char* modeName[6] = { "Zero", "Low", "HQ", "AI", "AI Deep", "AI Deep HQ" };
     auto fixed = [](int b) { return [b](long) { return b; }; };
 
     const double fs = 48000;
@@ -216,7 +219,7 @@ int main(int argc, char** argv)
     if (S.empty()) std::printf("note: no speech file, speech tests skipped\n");
 
     std::printf("== 1. steady playback, every mode, tones+hiss and speech in noise (block 256)\n");
-    for (int m = 0; m < 4; ++m) {
+    for (int m = 0; m < 6; ++m) {
         auto in = makeInst(fs, 4096); in.setMode(m);
         report(juce::String("steady tones, ") + modeName[m], analyse(T, run(in, T, fixed(256)), fs));
         if (!S.empty()) {
@@ -228,7 +231,7 @@ int main(int argc, char** argv)
     }
 
     std::printf("== 2. block sizes: output must be identical to block 256 (and click-free)\n");
-    for (int m = 0; m < 4; ++m) {
+    for (int m = 0; m < 6; ++m) {
         const Sig& X = S.empty() ? T : S;
         auto ref = makeInst(fs, 4096); ref.setMode(m);
         auto yRef = run(ref, X, fixed(256));
@@ -250,7 +253,7 @@ int main(int argc, char** argv)
 
     std::printf("== 3. parameter automation (random jumps every 10 ms / every block)\n");
     const char* contParams[] = { "Amount", "Reduction", "Output" };
-    for (int m = 0; m < 4; ++m) {
+    for (int m = 0; m < 6; ++m) {
         for (const Sig* X : std::initializer_list<const Sig*>{ &T, &S }) {
             if (X->empty()) continue;
             const bool sp = X == &S;
@@ -296,7 +299,7 @@ int main(int argc, char** argv)
     }
 
     std::printf("== 4. gate\n");
-    for (int m = 0; m < 4; ++m) {
+    for (int m = 0; m < 6; ++m) {
         if (!S.empty()) {
             auto in = makeInst(fs, 4096); in.setMode(m); in.setGateDb(-35);
             auto y = run(in, S, fixed(256));
@@ -327,14 +330,14 @@ int main(int argc, char** argv)
         if (X->empty()) continue;
         auto in = makeInst(fs, 4096);
         long next = 0; int k = 0;
-        const int seq[] = { 1, 2, 3, 0, 2, 0, 3, 1 };
-        auto y = run(in, *X, fixed(256), [&](long pos) { if (pos >= next) { next += 24000; in.setMode(seq[k++ % 8]); } });
+        const int seq[] = { 1, 4, 2, 5, 3, 0, 4, 2, 0, 5, 3, 1, 5, 4 };
+        auto y = run(in, *X, fixed(256), [&](long pos) { if (pos >= next) { next += 24000; in.setMode(seq[k++ % 14]); } });
         report(juce::String("mode switch every 0.5 s, ") + (X == &S ? "speech" : "tones"), analyse(*X, y, fs));
         writeWav(juce::String("mode_switch_") + (X == &S ? "speech" : "tones"), y, fs);
     }
 
     std::printf("== 6. extreme inputs\n");
-    for (int m = 0; m < 4; ++m) {
+    for (int m = 0; m < 6; ++m) {
         const long N = (long) (fs * 3);
         auto mk = [&](std::function<float(long, int)> f) { Sig s(2, std::vector<float>((size_t) N)); for (long n = 0; n < N; ++n) for (int c = 0; c < 2; ++c) s[(size_t) c][(size_t) n] = f(n, c); return s; };
         std::mt19937 rng(9); std::uniform_real_distribution<float> u(-1, 1);
@@ -363,7 +366,7 @@ int main(int argc, char** argv)
     }
 
     std::printf("== 7. one NaN / Inf sample from the host, then normal audio\n");
-    for (int m = 0; m < 4; ++m) {
+    for (int m = 0; m < 6; ++m) {
         for (float bad : { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity() }) {
             Sig X = T;
             X[0][(size_t) (fs * 1.0)] = bad;
@@ -381,7 +384,7 @@ int main(int argc, char** argv)
     std::printf("== 8. re-prepare mid-stream and other sample rates\n");
     for (double rate : { 44100.0, 88200.0, 96000.0, 176400.0, 192000.0 }) {
         const Sig X = tones(rate, 4.0);
-        for (int m : { 0, 3 }) {
+        for (int m : { 0, 3, 4, 5 }) {
             auto in = makeInst(rate, 4096); in.setMode(m);
             report(juce::String("tones at ") + juce::String(rate / 1000, 1) + " kHz, " + modeName[m], analyse(X, run(in, X, fixed(512)), rate));
         }

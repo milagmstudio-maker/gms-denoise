@@ -54,7 +54,7 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     learnAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "learn", learn);
     addAndMakeVisible(adaptive);
     adaptAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "adaptive", adaptive);
-    voiceProtect.setTooltip("AI mode: also keep quieter screams and shouts. Background chatter is removed less.");
+    voiceProtect.setTooltip("AI / AI Deep modes: also keep quieter screams and shouts. Background chatter is removed less.");
     addAndMakeVisible(voiceProtect);
     pauseClean.setTooltip("AI mode: where no voice is detected, pull the noise down to the Reduction setting. Very quiet word starts may lose a little.");
     addAndMakeVisible(pauseClean);
@@ -62,6 +62,7 @@ ZeroDenoiseEditor::ZeroDenoiseEditor(ZeroDenoiseProcessor& p)
     voiceAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.apvts, "voiceprotect", voiceProtect);
 
     mode.addItemList(ZeroDenoiseProcessor::modeNames(), 1);
+    mode.setTooltip(jp("AI Deep（20 ms）/ AI Deep HQ（40 ms）: DeepFilterNet3 によるノイズ除去。AI Deep は声の変化が少なく、HQ は語間の雑音をより深く消します（遅延は大きめ）。悲鳴や叫び声は自動で保護されます。初回選択時はモデル読み込みに約1秒かかり、その間は素通しです。"));
     addAndMakeVisible(mode);
     modeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "mode", mode);
     strength.addItemList(ZeroDenoiseProcessor::strengthNames(), 1);
@@ -156,16 +157,22 @@ void ZeroDenoiseEditor::refresh(bool immediate)
 {
     const int lat = proc.latencyForUi.load();
     const float sr = proc.sampleRateForUi.load();
-    if (lat != shownLatency || sr != shownRate) {
-        shownLatency = lat; shownRate = sr;
+    const bool loading = proc.isDfnLoading();
+    if (lat != shownLatency || sr != shownRate || loading != shownLoading) {
+        shownLatency = lat; shownRate = sr; shownLoading = loading;
         const double ms = 1000.0 * lat / (sr > 0 ? sr : 48000.0f);
-        latencyText = juce::String(ms, 1) + " ms";
+        latencyText = loading ? juce::String("loading AI...") : juce::String(ms, 1) + " ms";
         latencyTip = juce::String(lat) + " samples";
         repaint(latencyArea);
     }
     const bool ai = proc.isAiMode(); // the switch only acts in AI mode
-    for (auto* b : { &voiceProtect, &pauseClean })
-        if (b->isEnabled() != ai) { b->setEnabled(ai); b->setAlpha(ai ? 1.0f : 0.4f); }
+    const bool deep = proc.isDfnMode(); // AI Deep modes: the network does the work, the DSP controls do not apply
+    auto enable = [](juce::Component& b, bool on) { if (b.isEnabled() != on) { b.setEnabled(on); b.setAlpha(on ? 1.0f : 0.4f); } };
+    enable(voiceProtect, ai || deep);
+    enable(pauseClean, ai);
+    for (juce::Component* b : { (juce::Component*) &learn, (juce::Component*) &adaptive, (juce::Component*) &hiss,
+                                (juce::Component*) &strength, (juce::Component*) &gate })
+        enable(*b, !deep);
     {
         const float lvl = proc.inputLevelForUi.load(std::memory_order_relaxed);
         const bool on = proc.apvts.getRawParameterValue("gate")->load() > zd::DenoiserParams::kGateOff;

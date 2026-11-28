@@ -1,0 +1,23 @@
+[package]
+name = "dfbridge"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "C bridge to DeepFilterNet3 for Shizumaru: mid-channel network, per-channel filtering, voice guard, resampling"
+
+[lib]
+name = "dfbridge"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# DeepFilterNet (MIT OR Apache-2.0), fetched at a pinned commit by tools/fetch_deepfilternet.sh.
+# Both models are embedded by this crate (include_bytes), so no default-model feature.
+deep_filter = { path = "../../build-deps/DeepFilterNet/libDF", default-features = false, features = ["tract"] }
+
+[dev-dependencies]
+hound = "3.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

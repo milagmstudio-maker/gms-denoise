@@ -35,6 +35,7 @@ private:
     int blink = 0;
     juce::AudioProcessorValueTreeState::SliderAttachment amountAtt, outputAtt, reductionAtt, gateAtt, hissAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt, strengthAtt;
+    bool shownLoading = false;
     int shownLatency = -1; float shownRate = 0.0f;
     juce::String latencyText, latencyTip;
     std::array<float, ZeroDenoiseProcessor::kMeterBands> shown {};

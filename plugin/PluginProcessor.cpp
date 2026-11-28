@@ -20,6 +20,22 @@ ZeroDenoiseProcessor::ZeroDenoiseProcessor()
     strengthParam = apvts.getRawParameterValue("strength");
     hissParam = apvts.getRawParameterValue("hisscut");
     for (auto& m : meter) m.store(0.0f);
+    dfn.prepare(48000.0, 2);
+    dfnLoader.startThread(juce::Thread::Priority::low);
+}
+
+ZeroDenoiseProcessor::~ZeroDenoiseProcessor()
+{
+    dfnLoader.stopThread(5000);
+}
+
+void ZeroDenoiseProcessor::DfnLoader::run()
+{
+    while (!threadShouldExit()) {
+        for (int m = 0; m < zd::DfnRunner::kModels; ++m)
+            if (runner.loadWanted(m) && !runner.isLoaded(m)) runner.load(m);
+        wait(40);
+    }
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout ZeroDenoiseProcessor::createLayout()
@@ -63,9 +79,19 @@ bool ZeroDenoiseProcessor::isBusesLayoutSupported(const BusesLayout& layouts) co
     return out == layouts.getMainInputChannelSet();
 }
 
-void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int)
+void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    denoiser.prepare(sampleRate, getTotalNumOutputChannels());
+    const int nch = getTotalNumOutputChannels();
+    currentRate = sampleRate;
+    denoiser.prepare(sampleRate, nch);
+    dfn.prepare(sampleRate, nch);
+    const int blk = juce::jmax(64, samplesPerBlock);
+    inCopy.setSize(nch, blk); pathA.setSize(nch, blk); pathB.setSize(nch, blk);
+    // playback starts in a DeepFilterNet mode: load it now, not while the audio runs dry
+    const int mode = juce::jlimit(0, kNumModes - 1, (int) modeParam->load());
+    path = pathOfMode(mode); prevPath = -1; fadeLeft = 0;
+    fadeLen = juce::jmax(1, (int) std::lround(sampleRate * 0.02));
+    if (path > 0) dfn.load(path - 1);
     applyMode();
     outGain.reset(sampleRate, 0.02);
     outGain.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(outputParam->load()));
@@ -77,6 +103,7 @@ void ZeroDenoiseProcessor::prepareToPlay(double sampleRate, int)
     for (int b = 0; b <= kMeterBands; ++b) {
         const double f = fLo * std::pow(fHi / fLo, (double) b / kMeterBands);
         meterEdges[(size_t) b] = juce::jlimit(1, denoiser.getNumBins(), (int) std::lround(f / binHz));
+        dfnMeterEdges[(size_t) b] = juce::jlimit(1, 480, (int) std::lround(juce::jmin(f, 24000.0) / dfn.binHz()));
     }
 }
 
@@ -84,11 +111,16 @@ void ZeroDenoiseProcessor::applyMode()
 {
     const int mode = juce::jlimit(0, kNumModes - 1, (int) modeParam->load());
     aiModeForUi.store(mode == kModeAi);
-    const int la = kModeLookahead[mode] * denoiser.getScale();
-    if (la != denoiser.getLookahead() || getLatencySamples() != la) {
-        denoiser.setLookahead(la);
-        setLatencySamples(la); // host re-aligns tracks (plugin delay compensation)
+    const int pth = pathOfMode(mode);
+    dfnModeForUi.store(pth > 0);
+    int la;
+    if (pth > 0) {
+        la = zd::DfnRunner::latencyFor(pth - 1, currentRate);
+    } else {
+        la = kModeLookahead[mode] * denoiser.getScale();
+        if (la != denoiser.getLookahead()) denoiser.setLookahead(la);
     }
+    if (getLatencySamples() != la) setLatencySamples(la); // host re-aligns tracks (plugin delay compensation)
     latencyForUi.store(la);
 }
 
@@ -99,6 +131,14 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     for (int c = getTotalNumInputChannels(); c < numCh; ++c) buffer.clear(c, 0, buffer.getNumSamples());
 
     applyMode();
+    const int n = buffer.getNumSamples();
+    const int mode = juce::jlimit(0, kNumModes - 1, (int) modeParam->load());
+    const int newPath = pathOfMode(mode);
+    if (newPath != path) {
+        prevPath = path; path = newPath; fadeLeft = fadeLen;
+    }
+    if (path > 0 && isNonRealtime() && !dfn.isLoaded(path - 1)) dfn.load(path - 1); // offline render: never dry
+
     zd::DenoiserParams p = denoiser.getParams();
     p.amount = amountParam->load() * 0.01f;
     p.learn = learnParam->load() > 0.5f;
@@ -111,7 +151,50 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     p.maxJumpDb = kStrengthJumpDb[juce::jlimit(0, 2, (int) strengthParam->load())];
     p.ai = aiModeForUi.load();
     denoiser.setParams(p);
-    denoiser.process(buffer.getArrayOfWritePointers(), numCh, buffer.getNumSamples());
+
+    // DeepFilterNet: Amount 0-50 % scales the removal depth up to Reduction, 50-100 % adds the
+    // network's post-filter (a little more removal). Reduction at the top = no limit.
+    zd::DfnParams dp;
+    {
+        const float amt = p.amount, red = p.reductionDb;
+        dp.attenDb = red >= 79.5f ? 100.0f : red * juce::jmin(1.0f, amt * 2.0f);
+        dp.pfBeta = amt > 0.5f ? 0.04f * (amt - 0.5f) * 2.0f : 0.0f;
+        dp.guard = p.aiStrongVoice ? 2.0f : 1.0f;
+    }
+
+    if (inCopy.getNumSamples() < n || inCopy.getNumChannels() < numCh) { // host block larger than announced
+        inCopy.setSize(numCh, n, false, false, true); pathA.setSize(numCh, n, false, false, true); pathB.setSize(numCh, n, false, false, true);
+    }
+    const bool fading = fadeLeft > 0 && prevPath >= 0;
+    for (int c = 0; c < numCh; ++c) inCopy.copyFrom(c, 0, buffer, c, 0, n);
+
+    // the ZeroDenoiser always runs so a switch back to modes 0-3 continues seamlessly
+    for (int c = 0; c < numCh; ++c) pathA.copyFrom(c, 0, inCopy, c, 0, n);
+    runPath(0, pathA, numCh, n, dp);
+    for (int m = 0; m < zd::DfnRunner::kModels; ++m) {
+        const bool used = path == m + 1 || (fading && prevPath == m + 1);
+        if (!used) dfn.idle(m, inCopy.getArrayOfReadPointers(), numCh, n);
+    }
+    auto outputOf = [&](int which, juce::AudioBuffer<float>& dst) {
+        if (which == 0) { for (int c = 0; c < numCh; ++c) dst.copyFrom(c, 0, pathA, c, 0, n); return; }
+        for (int c = 0; c < numCh; ++c) dst.copyFrom(c, 0, inCopy, c, 0, n);
+        runPath(which, dst, numCh, n, dp);
+    };
+    outputOf(path, buffer);
+    if (fading) {
+        outputOf(prevPath, pathB);
+        const int k = juce::jmin(n, fadeLeft);
+        for (int i = 0; i < k; ++i) {
+            const float g = (float) (fadeLeft - i) / (float) fadeLen; // weight of the old path
+            for (int c = 0; c < numCh; ++c) {
+                float* o = buffer.getWritePointer(c);
+                o[i] = o[i] + g * (pathB.getSample(c, i) - o[i]);
+            }
+        }
+        fadeLeft -= k;
+        if (fadeLeft <= 0) prevPath = -1;
+    }
+    dfnLoadingForUi.store(path > 0 && !dfn.isWet(path - 1));
 
     outGain.setTargetValue(juce::Decibels::decibelsToGain(outputParam->load()));
     if (outGain.isSmoothing()) {
@@ -127,12 +210,20 @@ void ZeroDenoiseProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     gateOpenForUi.store(denoiser.isGateOpen(), std::memory_order_relaxed);
 }
 
+void ZeroDenoiseProcessor::runPath(int which, juce::AudioBuffer<float>& io, int numCh, int n, const zd::DfnParams& dp)
+{
+    if (which == 0) denoiser.process(io.getArrayOfWritePointers(), numCh, n);
+    else dfn.process(which - 1, io.getArrayOfWritePointers(), numCh, n, dp);
+}
+
 void ZeroDenoiseProcessor::updateMeter()
 {
-    const auto& g = denoiser.currentGain();
+    const bool d = path > 0;
+    const auto& g = d ? dfn.gains() : denoiser.currentGain();
+    const auto& edges = d ? dfnMeterEdges : meterEdges;
     for (int b = 0; b < kMeterBands; ++b) {
-        const int lo = meterEdges[(size_t) b];
-        const int hi = juce::jmax(lo + 1, meterEdges[(size_t) b + 1]);
+        const int lo = edges[(size_t) b];
+        const int hi = juce::jmax(lo + 1, edges[(size_t) b + 1]);
         float s = 0.0f;
         for (int k = lo; k < hi && k < (int) g.size(); ++k) s += g[(size_t) k] * g[(size_t) k];
         const float db = juce::Decibels::gainToDecibels(std::sqrt(s / (float) (hi - lo)), -60.0f);

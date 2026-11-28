@@ -42,7 +42,9 @@ audio, so onsets lose some level compared with an STFT design that has latency.
 
 | Path | Contents |
 |---|---|
-| `dsp/` | Framework-independent DSP core (`ZeroDenoiser`, small FFT) |
+| `dsp/` | Framework-independent DSP core (`ZeroDenoiser`, small FFT, `DfnRunner` for the AI Deep modes) |
+| `third_party/dfbridge/` | Rust bridge to DeepFilterNet3 (static library, C API in `include/dfbridge.h`) |
+| `cmake/DfBridge.cmake` | Fetches DeepFilterNet at a pinned commit into `build-deps/` and builds the bridge with cargo |
 | `plugin/` | JUCE processor and editor |
 | `tests/` | Unit tests for the core (zero latency, transparency, block-size independence, noise reduction, onset handling) |
 | `tools/zd_cli.cpp` | Offline WAV runner with a CPU-load readout |
@@ -59,6 +61,10 @@ cmake -S . -B build-plugin -DCMAKE_BUILD_TYPE=Release
 cmake --build build-plugin -j --target ZeroDenoisePlugin_All
 ./build-plugin/zd_host_check_artefacts/Release/zd_host_check build-plugin/ZeroDenoisePlugin_artefacts/Release/VST3/ZeroDenoise.vst3
 ```
+
+The AI Deep modes need Rust (`cargo`, https://rustup.rs). Configure with
+`-DZD_WITH_DFN=OFF` to build without them (the two modes then fall back to the
+AI mode). The first configure clones DeepFilterNet into `build-deps/`.
 
 On Linux the plugin build needs the usual JUCE packages (ALSA, X11, Xrandr,
 Xinerama, Xcursor, Xcomposite, Freetype, Fontconfig, GL dev packages).
@@ -311,3 +317,41 @@ User asked whether Learn really works. Measured (speech after a 3 s noise-only l
   (the network decides). Frozen keeps sustained notes (they are not learned as noise), but does not follow
   noise that changes.
 zd_cli: ZD_LEARN0 / ZD_LEARN (learn window in s), ZD_FREEZE (Adaptive off after), ZD_OLDLEARN.
+
+
+## AI Deep / AI Deep HQ (1.3.0)
+
+Two more modes run DeepFilterNet3 (MIT/Apache-2.0, https://github.com/Rikorose/DeepFilterNet):
+"AI Deep (20 ms)" uses the low-latency model, "AI Deep HQ (40 ms)" the standard model.
+The bridge (`third_party/dfbridge`, Rust) embeds both models.
+
+- **Same output as the reference.** With the guard off the bridge reproduces the
+  `deep-filter` tool to -64 dB (float rounding). The network runs once per hop on the
+  mid channel; its gains and deep-filter coefficients are applied to each channel's own
+  spectrum, so stereo costs the same as mono and the image is kept.
+- **Latency** is the model delay (10 / 30 ms) plus one 10 ms hop of buffering, because
+  the host block and the network hop do not line up: 960 / 1920 samples at 48 kHz.
+  Other rates are resampled inside the bridge (windowed sinc, passes up to ~20 kHz);
+  latency stays ~21 / 41 ms and is sample-exact (tests: Reduction 0 = pure delay).
+- **CPU** (one core, x86-64, stereo): AI Deep ~25 %, AI Deep HQ ~11 % (the low-latency
+  model is the bigger network), +4 % when resampling.
+- **Voice guard.** DeepFilterNet treats screams as noise (its own SNR estimate is about
+  -5 dB on them): the standard model cut screams by 5-8 dB, the low-latency one by up to
+  3.5 dB. The bridge keeps a minimum-statistics noise floor and a harmonic (pitch)
+  detector; in frames that are clearly voiced, at least as loud as speech the network
+  accepted, well above the noise floor, and of which the network kept less than half of
+  what a stationary-noise subtraction says is signal, no bin below 8 kHz may drop under
+  that subtraction gain. Scream loss (white / cafe noise, 10 dB SNR): standard model
+  -5.0/-8.0 dB -> -1.7/-1.5 dB, low latency -0.8/-3.5 -> -0.8/-2.1 dB. Normal speech is
+  left to the network (DNSMOS OVRL 3.17 -> 3.14 / 3.13, 9 noise types). Strong Voice
+  Protect relaxes the guard's conditions.
+- **Controls.** Amount 0-50 % scales the removal depth up to Reduction, 50-100 % adds the
+  network's post-filter; Reduction at 80 dB = no limit. Learn, Adaptive, Hiss Cut,
+  Strength and Gate do not apply (dimmed).
+- **Loading.** A network loads (~0.4-0.6 s, ~100 MB) the first time its mode is used, on
+  a background thread; meanwhile the plug-in passes the input delayed by the mode's
+  latency and then crossfades to the network (no click, latency always right). Offline
+  renders and playback that starts in the mode load it at once.
+- **Known limits.** The network runs in one go every 480 samples, inside the audio
+  callback that completes the hop, so very small host buffers can overrun (see the
+  per-hop timing in the PR). The network also allocates memory while it runs (tract).
